@@ -1,172 +1,165 @@
-# 🧬 Curalink — AI Medical Research Assistant
+<div align="center">
+  <img src="https://img.shields.io/badge/Curalink-AI_Medical_Assistant-D97757?style=for-the-badge&logo=medrt&logoColor=white" alt="Curalink Banner"/>
+  <h1>🧬 Curalink</h1>
+  <p><strong>A Precision AI Medical Research Workstation for Clinicians and Patients.</strong></p>
 
-An advanced **MERN stack** AI-powered medical research companion that retrieves, ranks, and reasons over real research data from **PubMed**, **OpenAlex**, and **ClinicalTrials.gov** using **Llama 3 70B** (via Groq).
+  <p>
+    <a href="#features"><img src="https://img.shields.io/badge/Features-Explore-3B82F6?style=flat-square" alt="Features"/></a>
+    <a href="#architecture"><img src="https://img.shields.io/badge/Architecture-View-8B5CF6?style=flat-square" alt="Architecture"/></a>
+    <a href="#quick-start"><img src="https://img.shields.io/badge/Quick%20Start-Launch-10B981?style=flat-square" alt="Quick Start"/></a>
+  </p>
 
----
-
-## 🏗️ Architecture
-
-```
-User Query
-    ↓
-🧠 Query Expansion (Llama-3.1-8b — LLM-powered synonym expansion)
-    ↓
-🔍 Parallel Retrieval (3 sources simultaneously)
-   ├── OpenAlex API    → 150+ publications (multi-page, 2018–present)
-   ├── PubMed NCBI API → 100+ publications (two-step: search IDs → fetch XML)
-   └── ClinicalTrials.gov v2 → 150+ trials (3 status groups)
-    ↓
-⚡ Two-Tier Cache (Redis L1 → MongoDB L2)
-    ↓
-📊 Multi-Factor Ranking Pipeline
-   ├── Publications:    Relevance(40%) + Recency(25%) + Credibility(20%) + Citations(15%)
-   └── Clinical Trials: Relevance(35%) + Status(25%) + Location(25%) + Recency(15%)
-    ↓
-🤖 LLM Reasoning (Llama-3.3-70b-versatile — structured JSON output)
-    ↓
-📋 Structured Response (Condition Overview + Research Insights + Trials + Recommendations)
-```
+  <p>
+    <img src="https://img.shields.io/badge/React_19-20232A?style=flat-square&logo=react&logoColor=61DAFB" alt="React 19" />
+    <img src="https://img.shields.io/badge/Node.js-43853D?style=flat-square&logo=node.js&logoColor=white" alt="Node" />
+    <img src="https://img.shields.io/badge/MongoDB-4EA94B?style=flat-square&logo=mongodb&logoColor=white" alt="MongoDB" />
+    <img src="https://img.shields.io/badge/Groq-F59E0B?style=flat-square&logo=fastapi&logoColor=white" alt="Groq" />
+    <img src="https://img.shields.io/badge/Llama_3-000000?style=flat-square&logo=meta&logoColor=white" alt="Llama 3" />
+  </p>
+</div>
 
 ---
 
-## 🚀 Quick Start
+> **Curalink** breaks the barrier between complex clinical data and accessible insights. It dynamically retrieves, actively ranks, and intelligently reasons over live global research data from **PubMed**, **OpenAlex**, and **ClinicalTrials.gov** to deliver highly structured, actionable medical intelligence in seconds.
 
-### Prerequisites
-- Node.js 18+
-- MongoDB (local or Atlas)
-- Redis (optional, auto-degrades to MongoDB cache)
-- Groq API key (free at [console.groq.com](https://console.groq.com))
+## ✨ High-Impact Features
 
-### 1. Clone & install
+<table>
+  <tr>
+    <td width="50%">
+      <h3>🎙️ Realtime Voice AI (Sarvam WebSockets)</h3>
+      <p>Communicate seamlessly hands-free. Real-time audio multiplexing streams directly via WebSockets to a Sarvam pipeline, featuring dynamic live captions and a custom "Thinking" particle-orb visualizer.</p>
+    </td>
+    <td width="50%">
+      <h3>🗺️ Global Trials Heatmap</h3>
+      <p>We geocode live data from the ClinicalTrials.gov API to render a <strong>high-performance Leaflet Heatmap</strong>, providing researchers instantaneous visual insights into clinical access hubs and density worldwide.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <h3>🗂️ 3-Pane Precision Workstation</h3>
+      <p>The UI elegantly transitions from a simple chat to a dense research dashboard featuring <strong>Navigational History</strong>, the <strong>Central Medical Canvas</strong>, and a <strong>Right Contextual Panel</strong> (live metrics, top researcher profiles, and caches).</p>
+    </td>
+    <td width="50%">
+      <h3>📄 Multi-Modal Medical Vision</h3>
+      <p>Simply drag and drop medical PDFs or imaging. Curalink utilizes <strong>Multer</strong>, <strong>Cloudinary</strong>, and <strong>Llama-3.2-90b-vision</strong> to instantly ingest and parse clinical document payloads directly into the active chat flow.</p>
+    </td>
+  </tr>
+</table>
+
+### 🔒 Persistent Clinical Profiles (Google OAuth)
+Log in securely via Google native OAuth. Configure default medical profiles (e.g. *Disease: Cystic Fibrosis | Hub: NY*) in your **Settings Router**. These contexts bypass the chat entirely and are intelligently merged into the AI retrieval pipeline automatically.
+
+---
+
+## 🏗️ The Multi-Factor RAG Architecture
+
+Curalink is significantly more capable than a standard chatbot. It operates an advanced parallel Retrieval-Augmented Generation (RAG) pipeline optimized for millisecond latency on Groq hardware.
+
+<details>
+<summary><b>View the Pipeline Workflow Diagram (Click to expand)</b></summary>
+<br>
+
+```mermaid
+graph TD
+    A([User Query: Text/Voice/PDF]) --> B[Llama-3.1-8b: Query Expansion]
+    B --> C{Parallel Medical APIs}
+    
+    C -->|PubMed NCBI| D[100+ Publications]
+    C -->|OpenAlex| E[150+ Academic Papers]
+    C -->|ClinicalTrials V2| F[150+ Status Trials]
+    
+    D --> G(Two-Tier Cache: Redis L1 → Mongo L2)
+    E --> G
+    F --> G
+    
+    G --> H[[Multi-Factor Ranking Algorithm]]
+    
+    H -->|Filtered Top Sources| I[Llama-3.3-70b-versatile Engine]
+    
+    I --> J([Structured RAG Response])
+```
+</details>
+
+1. **Intelligent Expansion**: Transforms simple questions into highly structured SNOMED/MeSH targeted queries.
+2. **Parallel Polling**: Queries multiple data lakes simultaneously.
+3. **Data Ranking Algorithm**: 
+   - *Publications*: Relevance (40%) + Recency (25%) + Credibility (20%) + Citations (15%)
+   - *Trials*: Relevance (35%) + Status (25%) + Location (25%) + Recency (15%)
+4. **Context Injection**: Top results are mapped and injected into the 70B reasoning framework.
+
+---
+
+## 🚀 Quick Start / Setup Guide
+
+### 1. Requirements
+Ensure you have the following installed:
+* Node.js v18.00+
+* MongoDB setup (Local or Atlas)
+* *Optional*: Redis Server (Auto-degrades to MongoDB cache if offline)
+
+### 2. Installation
 ```bash
+git clone https://github.com/rajvveer/hackathone3.git
+cd hakathone3
+
+# Install the server dependencies
 cd server && npm install
-cd ../client && npm install --legacy-peer-deps
+
+# Install the frontend dependencies
+cd ../client && npm install
 ```
 
-### 2. Configure environment
-```bash
-cp server/.env.example server/.env
-# Edit server/.env and set GROQ_API_KEY
+### 3. Environment Variables
+Create `.env` in the `/server` directory and `.env.local` in the `/client` directory.
+
+**`server/.env`**
+```env
+PORT=5000
+GROQ_API_KEY=your_groq_api_key
+SARVAM_API_KEY=your_sarvam_api_key
+CLOUDINARY_URL=your_cloudinary_url
+GOOGLE_CLIENT_ID=your_google_oauth_client_id
+JWT_SECRET=super_secure_jwt_secret
+MONGODB_URI=mongodb://localhost:27017/curalink
+REDIS_URL=redis://127.0.0.1:6379 
 ```
 
-### 3. Run
+**`client/.env.local`**
+```env
+VITE_GOOGLE_CLIENT_ID=your_google_oauth_client_id
+```
+
+### 4. Ignite the Engines
 ```bash
-# Terminal 1 — Backend
+# Terminal 1 — Fire up the robust Express + WebSockets backend
 cd server && npm run dev
 
-# Terminal 2 — Frontend
+# Terminal 2 — Boot the React UI
 cd client && npm run dev
 ```
 
-Open **http://localhost:5173**
+Visit **[http://localhost:5173](http://localhost:5173)** in your browser to experience Curalink. 
 
 ---
 
-## ⚙️ Configuration
+## 🛠️ The Tech Stack
 
-| Variable | Description | Default |
-|---|---|---|
-| `GROQ_API_KEY` | **Required** — Get free at console.groq.com | — |
-| `MONGODB_URI` | MongoDB connection string | `localhost:27017/curalink` |
-| `REDIS_URL` | Cloud Redis URL (Upstash etc.) | — |
-| `REDIS_HOST` | Local Redis host | `127.0.0.1` |
-| `REDIS_PORT` | Local Redis port | `6379` |
-| `NCBI_API_KEY` | PubMed rate limit: 3→10 req/sec | — |
-| `LLM_PROVIDER` | `groq` or `ollama` | `groq` |
-| `OLLAMA_URL` | Ollama server URL | `localhost:11434` |
+Curalink was engineered for absolute performance.
 
----
+<div align="center">
+  
+| Domain | Technologies |
+| :--- | :--- |
+| **Frontend** | React 19, Vite, React-Leaflet, OAuth2, Vanilla Glassmorphic CSS |
+| **Backend** | Node.js, Express, Socket.IO (WebSockets), Multer, SSE Event Streams |
+| **Databases** | MongoDB Core, Redis In-Memory L1 Cache, Cloudinary Storage |
+| **Generative SDKs** | Groq SDK, Sarvam API, Ollama (Local Fallback Compatibility) |
+| **Inference Models** | Llama 3.3 70B, Llama 3.1 8B, Llama 3.2 90B Vision, Bulbul V3 |
 
-## 🛠️ Tech Stack
+</div>
 
-### Backend
-- **Node.js + Express** — REST API with SSE streaming
-- **MongoDB + Mongoose** — Conversation history, persistent cache (24hr TTL)
-- **Redis (ioredis)** — In-memory L1 cache (1hr TTL), graceful degradation
-- **Groq SDK** — Llama 3 inference (llama-3.3-70b-versatile + llama-3.1-8b-instant)
-- **Ollama** — Local LLM fallback
-
-### Frontend
-- **React 19 + Vite 8** — SPA
-- **Vanilla CSS** — Dark glassmorphism design system
-- **SSE streaming** — Real-time pipeline step updates (server-driven)
-
-### Data Sources
-- **OpenAlex API** — Open academic publications (3 pages × 50 = 150 per query)
-- **PubMed NCBI E-utilities** — Biomedical literature (100 per query, XML parsing)
-- **ClinicalTrials.gov API v2** — Clinical trials (3 status groups × 50 = 150 total)
-
----
-
-## 🔌 API Endpoints
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/api/chat` | Standard JSON response |
-| `POST` | `/api/chat/stream` | **SSE streaming** — real-time pipeline events |
-| `GET` | `/api/conversations` | List all conversations |
-| `GET` | `/api/conversations/:id` | Get conversation with full history |
-| `POST` | `/api/conversations/new` | Create new conversation |
-| `DELETE` | `/api/conversations/:id` | Delete conversation |
-| `GET` | `/api/health` | Health check (shows Redis/LLM status) |
-
-### Streaming Events (`/api/chat/stream`)
-```
-event: step       → { step: 1-4, message: "..." }        (pipeline progress)
-event: expanded   → { disease, queries[], isResearcherQuery }
-event: retrieved  → { openAlex, pubmed, trials, fromCache }
-event: ranked     → { selectedPubs, selectedTrials }
-event: result     → { full response JSON }
-event: done       → {}
-event: error      → { message }
-```
-
----
-
-## 📊 Demo Queries
-
-- `"Latest treatment for lung cancer"`
-- `"Clinical trials for diabetes"`
-- `"Top researchers in Alzheimer's disease"` — triggers OpenAlex Authors API
-- `"Recent studies on heart disease"`
-- Structured: Patient Name + Disease + Query + Location
-
----
-
-## 📁 Project Structure
-
-```
-hakathone3/
-├── client/                     # React frontend
-│   ├── src/
-│   │   ├── App.jsx             # Main layout + pipeline banner
-│   │   ├── components/
-│   │   │   ├── MessageBubble.jsx   # Full response renderer
-│   │   │   ├── LoadingState.jsx    # 4-step pipeline progress
-│   │   │   ├── Sidebar.jsx         # Conversation history
-│   │   │   └── StructuredForm.jsx  # Structured query form
-│   │   ├── hooks/useChat.js        # SSE streaming state management
-│   │   └── services/api.js         # API + streaming client
-│   └── vite.config.js
-└── server/                     # Node.js backend
-    ├── index.js                # Express + Redis init
-    ├── config/
-    │   ├── constants.js        # API endpoints, weights, models
-    │   ├── db.js               # MongoDB connection
-    │   └── redis.js            # Redis client (graceful degradation)
-    ├── controllers/
-    │   └── chatController.js   # Pipeline orchestration + SSE handler
-    ├── middleware/errorHandler.js
-    ├── models/
-    │   ├── Conversation.js     # Chat history schema
-    │   └── ResearchCache.js    # Query result cache (TTL: 24hr)
-    ├── routes/chatRoutes.js
-    └── services/
-        ├── queryExpander.js        # LLM + rule-based expansion
-        ├── openAlexService.js      # Publications + Top Researchers
-        ├── pubmedService.js        # Two-step PubMed retrieval
-        ├── clinicalTrialsService.js
-        ├── retrievalManager.js     # Two-tier cache + parallel fetch
-        ├── rankingPipeline.js      # Multi-factor scoring
-        └── llmService.js           # Groq/Ollama reasoning
-```
+<br>
+<p align="center">
+  <i>Developed for the Hackathon. Innovating the speed of medical intelligence.</i>
+</p>

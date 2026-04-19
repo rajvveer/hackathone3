@@ -7,8 +7,9 @@ import StructuredForm from './components/StructuredForm';
 import FollowUpQuestions from './components/FollowUpQuestions';
 import VoiceAssistant from './components/VoiceAssistant';
 import FileUpload from './components/FileUpload';
+import ContextSidebar from './components/ContextSidebar';
+import ProfilePage from './components/ProfilePage';
 import './index.css';
-
 const QUICK_ACTIONS = [
   { icon: '🫁', label: 'Lung Cancer', text: 'Latest treatment for lung cancer' },
   { icon: '💉', label: 'Diabetes', text: 'Clinical trials for diabetes' },
@@ -40,6 +41,7 @@ export default function App() {
   const textareaRef = useRef(null);
   const [voiceMode, setVoiceMode] = useState(false);
   const [showFileUpload, setShowFileUpload] = useState(false);
+  const [currentView, setCurrentView] = useState('chat'); // 'chat', 'profile'
 
   // Theme: dark / light
   const [theme, setTheme] = useState(() => {
@@ -78,6 +80,7 @@ export default function App() {
   const handleStructuredSubmit = (formData) => {
     if (loading) return;
     send(formData, true);
+    setInputMode('chat');
   };
 
   const handleQuickAction = (text) => {
@@ -85,19 +88,43 @@ export default function App() {
     send(text, false);
   };
 
+  // Determine if we need the Context Sidebar
+  const activeContextMsg = messages.find(m => m.structuredInput);
+  const activeResponseMsg = messages.find(m => m.response?.conditionOverview);
+  
+  const showRightSidebar = !!activeContextMsg;
+  const contextData = activeContextMsg?.structuredInput;
+  const contextOverview = activeResponseMsg?.response?.conditionOverview;
+  
+  // Try to find the latest valid retrieval stats out of the messages, or use live stats
+  const contextStats = retrievalStats || (activeResponseMsg?.pipelineMetrics ? { 
+    pubmed: activeResponseMsg.response.publications?.length || 0,
+    openAlex: 0,
+    trials: activeResponseMsg.response.clinicalTrials?.length || 0
+  } : null);
+
   return (
-    <div className="app-layout">
+    <div className={`app-layout ${showRightSidebar ? 'has-right-sidebar' : ''}`}>
       <Sidebar
         conversations={conversations}
         currentConversationId={currentConversationId}
-        onSelectConversation={(id) => { loadConversation(id); setSidebarOpen(false); }}
-        onNewChat={() => { startNewChat(); setSidebarOpen(false); }}
-        onDeleteConversation={removeConversation}
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         user={user}
         loginUser={loginUser}
         logoutUser={logoutUser}
+        onChangeView={(view) => setCurrentView(view)}
+        onSelectConversation={(id) => {
+          loadConversation(id);
+          setCurrentView('chat');
+          setSidebarOpen(false);
+        }}
+        onNewChat={() => {
+          startNewChat();
+          setCurrentView('chat');
+          setSidebarOpen(false);
+        }}
+        onDeleteConversation={removeConversation}
       />
 
       <main className="main-area">
@@ -144,27 +171,11 @@ export default function App() {
                 Structured
               </button>
             </div>
-
-            {/* Theme Toggle */}
-            <button
-              className="theme-toggle"
-              onClick={toggleTheme}
-              aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
-              id="theme-toggle"
-            >
-              <div className="theme-toggle-track">
-                <div className="theme-toggle-thumb">
-                  <span className="theme-toggle-icon">
-                    {theme === 'light' ? '☀️' : '🌙'}
-                  </span>
-                </div>
-              </div>
-            </button>
           </div>
         </header>
 
-        {/* Live pipeline info banner — shows during loading */}
-        {loading && expandedQueries.length > 0 && (
+        {/* Sub-Header area with dynamic content */}
+        {currentView === 'chat' && loading && expandedQueries.length > 0 && (
           <div className="pipeline-banner">
             <div className="pipeline-banner-inner">
               <div className="pipeline-banner-left">
@@ -195,6 +206,7 @@ export default function App() {
           </div>
         )}
 
+        {currentView === 'chat' && (<>
         {/* Messages */}
         <div className="messages-container">
           {messages.length === 0 && !loading && (
@@ -244,7 +256,7 @@ export default function App() {
           )}
 
           {messages.map((msg, i) => (
-            <MessageBubble key={i} message={msg} />
+            <MessageBubble key={i} message={msg} conversationId={currentConversationId} />
           ))}
 
           {/* Follow-up clarification questions */}
@@ -303,9 +315,7 @@ export default function App() {
                   id="voice-mode-btn"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                    <path d="M12 1C10.34 1 9 2.34 9 4V12C9 13.66 10.34 15 12 15C13.66 15 15 13.66 15 12V4C15 2.34 13.66 1 12 1Z" fill="currentColor"/>
-                    <path d="M19 10V12C19 15.87 15.87 19 12 19C8.13 19 5 15.87 5 12V10" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                    <path d="M12 19V23M8 23H16" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                    <path d="M12 4V20M8 9V15M4 11V13M16 7V17M20 10V14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                   </svg>
                 </button>
                 <button
@@ -321,10 +331,25 @@ export default function App() {
               </div>
             </div>
           ) : (
-            <StructuredForm onSubmit={handleStructuredSubmit} disabled={loading} />
+             <StructuredForm onSubmit={handleStructuredSubmit} disabled={loading} />
           )}
         </div>
+      </>)}
+      
+      {currentView === 'profile' && (
+        <ProfilePage user={user} theme={theme} toggleTheme={toggleTheme} onBack={() => setCurrentView('chat')} />
+      )}
       </main>
+
+      {/* Right Context Sidebar */}
+      {showRightSidebar && currentView === 'chat' && (
+        <ContextSidebar 
+          contextData={contextData} 
+          overview={contextOverview} 
+          stats={contextStats} 
+          fullData={activeResponseMsg?.response}
+        />
+      )}
 
       {/* Voice Mode Modal */}
       {voiceMode && (

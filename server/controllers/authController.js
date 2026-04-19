@@ -48,3 +48,34 @@ exports.googleLogin = async (req, res) => {
     res.status(500).json({ error: 'Authentication failed', details: error.message });
   }
 };
+
+exports.getProfile = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch profile' });
+  }
+};
+
+exports.updateProfile = async (req, res) => {
+  try {
+    const { medicalProfile } = req.body;
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    if (medicalProfile) {
+      user.medicalProfile = {
+        ...user.medicalProfile,
+        ...medicalProfile
+      };
+    }
+    
+    await user.save();
+    res.json(user);
+  } catch (error) {
+    console.error('Profile update error:', error);
+    res.status(500).json({ error: 'Failed to update profile' });
+  }
+};

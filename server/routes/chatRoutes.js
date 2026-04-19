@@ -30,6 +30,12 @@ router.post('/chat/clarify', optionalAuth, chatController.handleClarification);
 // Medical file upload & AI analysis
 router.post('/chat/upload', optionalAuth, upload.single('file'), chatController.handleFileUpload);
 
+// Trial Matcher
+router.post('/chat/trial-match', optionalAuth, chatController.matchTrial);
+
+// Heatmap Coordinates
+router.post('/chat/heatmap-coords', optionalAuth, chatController.getHeatmapCoords);
+
 // Conversation management
 router.get('/conversations', optionalAuth, chatController.getConversations);
 router.get('/conversations/:id', optionalAuth, chatController.getConversation);

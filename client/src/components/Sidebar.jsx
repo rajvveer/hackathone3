@@ -1,9 +1,22 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { GoogleLogin } from '@react-oauth/google';
 
-export default function Sidebar({ conversations, currentConversationId, onSelectConversation, onNewChat, onDeleteConversation, isOpen, onClose, user, loginUser, logoutUser }) {
+export default function Sidebar({ conversations, currentConversationId, onSelectConversation, onNewChat, onDeleteConversation, isOpen, onClose, user, loginUser, logoutUser, onChangeView }) {
   const [hoveredId, setHoveredId] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const profileMenuRef = useRef(null);
+
+  // Close menu if clicking outside
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target)) {
+        setShowProfileMenu(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const formatDate = (dateStr) => {
     const d = new Date(dateStr);
@@ -150,19 +163,47 @@ export default function Sidebar({ conversations, currentConversationId, onSelect
         {/* Footer */}
         <div className="sidebar-footer">
           {user ? (
-            <div className="user-profile">
-              <img src={user.picture} alt="Profile" className="user-avatar" referrerPolicy="no-referrer" />
-              <div className="user-info">
-                <span className="user-name">{user.name}</span>
-                <span className="user-email">{user.email}</span>
-              </div>
-              <button className="logout-btn" onClick={logoutUser} title="Logout">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                  <path d="M9 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                  <path d="M16 17L21 12L16 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                  <path d="M21 12H9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            <div className="user-profile-container" ref={profileMenuRef}>
+              <div 
+                className={`user-profile clickable ${showProfileMenu ? 'active' : ''}`} 
+                onClick={() => setShowProfileMenu(!showProfileMenu)}
+              >
+                <img src={user.picture} alt="Profile" className="user-avatar" referrerPolicy="no-referrer" />
+                <div className="user-info">
+                  <span className="user-name">{user.name}</span>
+                  <span className="user-email">{user.email}</span>
+                </div>
+                <svg className="profile-menu-arrow" width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M4 10L8 6L12 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
-              </button>
+              </div>
+
+              {showProfileMenu && (
+                <div className="profile-dropdown-menu">
+                  <button 
+                    className="dropdown-item" 
+                    onClick={() => { onChangeView('profile'); setShowProfileMenu(false); onClose && onClose(); }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                      <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M4 20C4 16.6863 7.58172 14 12 14C16.4183 14 20 16.6863 20 20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    Profile & Settings
+                  </button>
+                  <div className="dropdown-divider"></div>
+                  <button 
+                    className="dropdown-item text-danger" 
+                    onClick={() => { logoutUser(); setShowProfileMenu(false); }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                      <path d="M9 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d="M16 17L21 12L16 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d="M21 12H9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    Log Out
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <div className="auth-section">

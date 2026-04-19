@@ -1,5 +1,16 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Typewriter from './Typewriter';
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+
+// Fix leaflet default icon issues
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
 
 const STATUS_CLASS = {
   'RECRUITING': 'recruiting',
@@ -105,6 +116,73 @@ function CopyButton({ text }) {
   );
 }
 
+/* ── Clinical Trials Heatmap ─────────────────────────────── */
+function ClinicalTrialsHeatmap({ trials }) {
+  const [markers, setMarkers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchCoords = async () => {
+      const locations = trials
+        .map(t => t.location)
+        .filter(loc => loc && loc.length > 3 && loc !== 'Location not specified');
+      
+      const uniqueLocs = [...new Set(locations)].slice(0, 15); // max 15 to keep it fast
+
+      if (uniqueLocs.length === 0) {
+        if(mounted) setLoading(false);
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/chat/heatmap-coords', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ locations: uniqueLocs })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (mounted) setMarkers(data);
+        }
+      } catch (err) {
+        console.error('Heatmap load error', err);
+      } finally {
+        if(mounted) setLoading(false);
+      }
+    };
+    fetchCoords();
+    return () => { mounted = false; };
+  }, [trials]);
+
+  if (loading) {
+    return <div className="heatmap-loading"><div className="heatmap-pulse"></div> Generating Global Distribution...</div>;
+  }
+
+  if (markers.length === 0) return null;
+
+  return (
+    <div className="trials-heatmap-container fade-in-section">
+      <div className="section-label">
+        <span className="section-label-icon">🗺️</span> Global Trial Distribution
+      </div>
+      <MapContainer center={[20, 0]} zoom={2} scrollWheelZoom={true} className="trials-map">
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+        />
+        {markers.filter(loc => loc.lat && loc.lng).map((loc, i) => (
+          <Marker key={i} position={[loc.lat, loc.lng]}>
+            <Popup>
+              {loc.location}
+            </Popup>
+          </Marker>
+        ))}
+      </MapContainer>
+    </div>
+  );
+}
+
 /* ── Publication Card ────────────────────────────────────── */
 function PublicationCard({ pub, index }) {
   const [showAbstract, setShowAbstract] = useState(false);
@@ -166,11 +244,33 @@ function PublicationCard({ pub, index }) {
 }
 
 /* ── Trial Card ──────────────────────────────────────────── */
-function TrialCard({ trial, index }) {
+function TrialCard({ trial, index, conversationId }) {
   const [activeTab, setActiveTab] = useState('details');
+  const [matchState, setMatchState] = useState(null);
+  const [followUpAnswer, setFollowUpAnswer] = useState({});
 
   const statusLabel = trial.status?.replace(/_/g, ' ') || 'Unknown';
   const statusIcon = STATUS_ICON[trial.status] || '⚪';
+
+  const checkEligibility = async (additionalContext = '') => {
+    setMatchState('loading');
+    try {
+      const res = await fetch('/api/chat/trial-match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ criteria: trial.eligibility, conversationId, additionalContext })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMatchState(data);
+        setFollowUpAnswer('');
+      } else {
+        setMatchState({ error: data.error || 'Failed to check match' });
+      }
+    } catch {
+      setMatchState({ error: 'Network error checking eligibility' });
+    }
+  };
 
   return (
     <div className="trial-card-v2" style={{ animationDelay: `${index * 80}ms` }}>
@@ -258,7 +358,80 @@ function TrialCard({ trial, index }) {
         )}
         {activeTab === 'eligibility' && trial.eligibility && (
           <div className="trial-eligibility-v2">
-            {trial.eligibility}
+            <div className="eligibility-matcher">
+              {!matchState && (
+                <button className="match-btn" onClick={() => checkEligibility('')}>
+                  <span className="match-icon">🧬</span> Am I Eligible?
+                </button>
+              )}
+              {matchState === 'loading' && (
+                <div className="match-loading">
+                  <div className="match-pulse"></div>
+                  <span>AI Analyzing trial criteria against your profile...</span>
+                </div>
+              )}
+              {matchState && matchState !== 'loading' && !matchState.error && (
+                <div className={`match-result ${matchState.isEligible ? 'eligible' : 'ineligible'}`}>
+                  <div className="match-result-header">
+                    <span className="match-result-icon">{matchState.isEligible ? '✅' : '⚠️'}</span>
+                    <span className="match-result-title">
+                      {matchState.isEligible ? 'Likely Eligible' : 'Ineligible or Needs Info'}
+                    </span>
+                  </div>
+                  <p className="match-result-reasoning">{matchState.reasoning}</p>
+                  
+                  {matchState.missingQuestions && matchState.missingQuestions.length > 0 && (
+                    <div className="match-followup-section fade-in-section">
+                      <div className="match-followup-header">
+                        <div className="match-followup-icon">✨</div>
+                        <span className="match-followup-title">AI Needs Clarification to Verify Eligibility</span>
+                      </div>
+                      <div className="match-followup-form">
+                        {matchState.missingQuestions.map((q, i) => (
+                          <div key={i} className="followup-qa-pair">
+                            <label className="followup-question-label">{q}</label>
+                            <input 
+                              type="text" 
+                              className="followup-specific-input"
+                              placeholder="Your answer..."
+                              value={followUpAnswer[i] || ''}
+                              onChange={(e) => setFollowUpAnswer({ ...followUpAnswer, [i]: e.target.value })}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  const ans = Object.values(followUpAnswer).filter(v => v.trim()).join(', ');
+                                  if (ans) checkEligibility(ans);
+                                }
+                              }}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                      <div className="match-followup-actions">
+                        <button 
+                          className={`followup-submit-btn ${Object.keys(followUpAnswer).length > 0 ? 'active' : ''}`}
+                          onClick={() => {
+                            const combinedAnswers = matchState.missingQuestions
+                              .map((q, i) => followUpAnswer[i] ? `Q: ${q} A: ${followUpAnswer[i]}` : '')
+                              .filter(Boolean)
+                              .join(' | ');
+                            if (combinedAnswers) checkEligibility(combinedAnswers);
+                          }}
+                          disabled={Object.keys(followUpAnswer).length === 0}
+                        >
+                          Verify Eligibility
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              {matchState?.error && (
+                <div className="match-error">⚠️ {matchState.error}</div>
+              )}
+            </div>
+            <div className="eligibility-text">
+              {trial.eligibility}
+            </div>
           </div>
         )}
         {activeTab === 'summary' && trial.summary && (
@@ -328,8 +501,6 @@ function MetricsBar({ metrics }) {
     { value: metrics.totalRetrieved || 0, label: 'Retrieved', icon: '📥' },
     { value: metrics.selectedPublications || 0, label: 'Top Pubs', icon: '📚' },
     { value: metrics.selectedTrials || 0, label: 'Trials', icon: '🧪' },
-    { value: metrics.totalTimeMs ? `${(metrics.totalTimeMs / 1000).toFixed(1)}s` : '—', label: 'Total', icon: '⏱' },
-    { value: metrics.llmTimeMs ? `${(metrics.llmTimeMs / 1000).toFixed(1)}s` : '—', label: 'LLM', icon: '🤖' },
   ];
 
   return (
@@ -342,13 +513,6 @@ function MetricsBar({ metrics }) {
             <span className="metric-label-v2">{item.label}</span>
           </div>
         ))}
-        {metrics.fromCache && (
-          <div className="metric-item-v2 cache-hit">
-            <span className="metric-icon-v2">⚡</span>
-            <span className="metric-value-v2">{metrics.fromCache}</span>
-            <span className="metric-label-v2">Cache</span>
-          </div>
-        )}
       </div>
       {metrics.expandedQueries && metrics.expandedQueries.length > 0 && (
         <div className="metrics-queries-v2">
@@ -367,7 +531,7 @@ function MetricsBar({ metrics }) {
 /* ══════════════════════════════════════════════════════════ */
 /* ██ MAIN MESSAGE BUBBLE                                  ██ */
 /* ══════════════════════════════════════════════════════════ */
-export default function MessageBubble({ message }) {
+export default function MessageBubble({ message, conversationId }) {
   const [copied, setCopied] = useState(false);
 
   if (message.role === 'user') {
@@ -684,9 +848,10 @@ export default function MessageBubble({ message }) {
               count={r.clinicalTrials.length}
               delay={400}
             >
+              <ClinicalTrialsHeatmap trials={r.clinicalTrials} />
               <div className="cards-list-v2">
                 {r.clinicalTrials.map((trial, i) => (
-                  <TrialCard key={i} trial={trial} index={i} />
+                  <TrialCard key={i} trial={trial} index={i} conversationId={conversationId} />
                 ))}
               </div>
             </CollapsibleSection>

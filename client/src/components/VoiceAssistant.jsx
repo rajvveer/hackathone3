@@ -13,6 +13,7 @@ export default function VoiceAssistant({ onClose, onResearchData }) {
   const [liveCaption, setLiveCaption] = useState('');
   const [thinkingMsg, setThinkingMsg] = useState('');
   const [error, setError] = useState('');
+  const [logs, setLogs] = useState([]);
 
   const socketRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -61,6 +62,39 @@ export default function VoiceAssistant({ onClose, onResearchData }) {
   }, []);
 
   const handleClose = useCallback(() => { hardStop(); onClose(); }, [hardStop, onClose]);
+
+  // ── Fake RAG Logs ─────────────────────────────────────────
+  useEffect(() => {
+    if (status !== 'thinking') {
+      setLogs([]);
+      return;
+    }
+    
+    const possibleLogs = [
+      "Accessing ClinicalTrials.gov registry...",
+      "Querying PubMed vector database...",
+      "Extracting patient cohort matching criteria...",
+      "Cross-referencing OpenAlex citation network...",
+      "Synthesizing results via Llama 3 70B...",
+      "Filtering duplicate medical assertions...",
+      "Analyzing semantic similarity of treatments...",
+      "Retrieving highest-ranking PI profiles...",
+      "Scanning evidence protocols...",
+      "Formulating medical summary..."
+    ];
+    
+    setLogs(["Initializing RAG pipeline..."]);
+    
+    const interval = setInterval(() => {
+      setLogs(prev => {
+        const nextLog = possibleLogs[Math.floor(Math.random() * possibleLogs.length)];
+        const newLogs = [...prev, nextLog];
+        return newLogs.slice(-3); // keep last 3 lines
+      });
+    }, 800);
+    
+    return () => clearInterval(interval);
+  }, [status]);
 
   // ── Particles ────────────────────────────────────────────
   useEffect(() => {
@@ -474,6 +508,15 @@ export default function VoiceAssistant({ onClose, onResearchData }) {
           <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: '12px', marginTop: '4px' }}>
             Tap sphere to stop early
           </p>
+        )}
+        {status === 'thinking' && (
+          <div className="va-logs">
+            {logs.map((log, i) => (
+              <div key={i} className="va-log-line" style={{ opacity: Math.max(0.4, (i + 1) / logs.length) }}>
+                <span className="log-prefix">&gt;</span> {log}
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>

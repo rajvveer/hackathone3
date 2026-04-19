@@ -51,25 +51,39 @@ async function loadOrCreateConversation(conversationId, userInput, user) {
   let convId = conversationId || uuidv4();
   let conversation = await Conversation.findOne({ conversationId: convId });
 
+  let dbUser = null;
+  if (user) {
+    const User = require('../models/User');
+    dbUser = await User.findById(user._id);
+  }
+
   if (!conversation) {
+    // If structured input was provided, use it. Otherwise seamlessly inject defaults from global medical profile.
+    const defaultProfile = dbUser?.medicalProfile || {};
+    
     conversation = new Conversation({
       conversationId: convId,
       userId: user ? user._id : undefined,
       title: typeof userInput === 'string'
         ? userInput.substring(0, 60)
-        : (userInput.query || userInput.disease || 'New Research Chat'),
+        : (userInput.query || userInput.disease || defaultProfile.diseaseOfInterest || 'New Research Chat'),
       userProfile: typeof userInput === 'object' ? {
-        patientName: userInput.patientName,
-        diseaseOfInterest: userInput.disease,
-        location: userInput.location
-      } : {}
+        patientName: userInput.patientName || defaultProfile.patientName,
+        diseaseOfInterest: userInput.disease || defaultProfile.diseaseOfInterest,
+        location: userInput.location || defaultProfile.location
+      } : {
+        patientName: defaultProfile.patientName,
+        diseaseOfInterest: defaultProfile.diseaseOfInterest,
+        location: defaultProfile.location
+      }
     });
   } else if (typeof userInput === 'object' && userInput.disease) {
     // Update userProfile on pre-created conversations (from /conversations/new)
+    const defaultProfile = dbUser?.medicalProfile || {};
     conversation.userProfile = {
-      patientName: userInput.patientName || conversation.userProfile?.patientName || '',
-      diseaseOfInterest: userInput.disease || conversation.userProfile?.diseaseOfInterest || '',
-      location: userInput.location || conversation.userProfile?.location || ''
+      patientName: userInput.patientName || conversation.userProfile?.patientName || defaultProfile.patientName || '',
+      diseaseOfInterest: userInput.disease || conversation.userProfile?.diseaseOfInterest || defaultProfile.diseaseOfInterest || '',
+      location: userInput.location || conversation.userProfile?.location || defaultProfile.location || ''
     };
   }
 
@@ -589,3 +603,44 @@ exports.handleFileUpload = async (req, res) => {
   }
 };
 
+exports.matchTrial = async (req, res) => {
+  const { criteria, conversationId, additionalContext } = req.body;
+  if (!criteria) {
+    return res.status(400).json({ error: 'Eligibility criteria required.' });
+  }
+
+  try {
+    let context = {};
+    if (conversationId) {
+      const conv = await Conversation.findOne({ id: conversationId });
+      if (conv) {
+        context = {
+          disease: conv.structuredData?.disease || '',
+          context: conv.messages.map(m => m.content).join(' '),
+          structuredData: conv.structuredData
+        };
+      }
+    }
+
+    const matchData = await llmService.evaluateEligibility(criteria, context, additionalContext);
+    res.json(matchData);
+  } catch (err) {
+    console.error('Trial Match Error:', err);
+    res.status(500).json({ error: 'Failed to match trial.' });
+  }
+};
+
+exports.getHeatmapCoords = async (req, res) => {
+  const { locations } = req.body;
+  if (!locations || !locations.length) {
+    return res.status(400).json({ error: 'Locations array required.' });
+  }
+
+  try {
+    const coords = await llmService.extractCoordinatesBatch(locations);
+    res.json(coords);
+  } catch (err) {
+    console.error('Heatmap Extractor Error:', err);
+    res.status(500).json({ error: 'Failed to extract heatmap coords.' });
+  }
+};

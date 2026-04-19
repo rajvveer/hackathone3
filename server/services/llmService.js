@@ -400,11 +400,11 @@ NEVER REPEAT YOURSELF:
 
     // Provide research context WITHOUT author names to prevent AI from reading them
     const pubContext = publications.slice(0, 5).map((p, i) =>
-      `${i+1}. Finding: ${p.title} (${p.year || 'Recent'}) — ${p.abstract?.substring(0, 200) || 'No details'}`
+      `${i + 1}. Finding: ${p.title} (${p.year || 'Recent'}) — ${p.abstract?.substring(0, 200) || 'No details'}`
     ).join('\n');
 
     const trialContext = clinicalTrials.slice(0, 3).map((t, i) =>
-      `${i+1}. Trial: ${t.title} — Phase: ${t.phase || 'N/A'}, Status: ${t.status}`
+      `${i + 1}. Trial: ${t.title} — Phase: ${t.phase || 'N/A'}, Status: ${t.status}`
     ).join('\n');
 
     // Build history context with clear "already said" markers
@@ -413,9 +413,9 @@ NEVER REPEAT YOURSELF:
       const prevAssistantMsgs = conversationHistory
         .filter(m => m.role === 'assistant')
         .map(m => m.content);
-      
+
       historyContext = `\nConversation so far:\n${conversationHistory.map(m => `${m.role}: ${m.content}`).join('\n')}`;
-      
+
       if (prevAssistantMsgs.length > 0) {
         historyContext += `\n\n⚠️ YOU ALREADY SAID THE FOLLOWING — do NOT repeat any of this:\n${prevAssistantMsgs.join('\n---\n')}`;
       }
@@ -548,9 +548,111 @@ Analyze this medical document and respond ONLY in this exact JSON format:
       return typeof transcription === 'string' ? transcription : transcription.text || '';
     } finally {
       // Clean up temp file
-      try { fs.unlinkSync(tmpPath); } catch (_) {}
+      try { fs.unlinkSync(tmpPath); } catch (_) { }
+    }
+  }
+  /**
+   * Evaluate if a user matches a clinical trial's eligibility criteria
+   */
+  async evaluateEligibility(trialCriteria, userContext, additionalContext = '') {
+    if (!this.groq) throw new Error('Groq client not initialized');
+
+    // Only pass relevant fields to avoid sending unnecessary data
+    const safeContext = {
+      disease: userContext.disease,
+      context: userContext.context || '',
+      additionalNotes: userContext.structuredData?.query || '',
+      patientName: userContext.structuredData?.patientName || 'Patient',
+      userDirectAnswers: additionalContext // User's direct answers to follow up questions
+    };
+
+    const prompt = `You are an expert Clinical Trial Coordinator AI.
+Based on the following Clinical Trial Eligibility Criteria and the User's Context, determine if the user is likely eligible (True) or ineligible (False). 
+
+CRITICAL RULE: If the user is missing CRITICAL information that is strictly required to determine eligibility (e.g., exact age, cancer stage, specific prior treatments), you must return "isEligible": false, explain what is missing in the reasoning, and provide exactly 1-2 short "missingQuestions" the user needs to answer.
+
+[User Context]
+${JSON.stringify(safeContext, null, 2)}
+
+[Trial Eligibility Criteria]
+${trialCriteria.substring(0, 3000)}
+
+Respond ONLY in strictly valid JSON format matching this exact schema:
+{
+  "isEligible": boolean,
+  "reasoning": "A simple 2-sentence explanation.",
+  "missingQuestions": ["Array of 1 to 2 direct questions for the user, only if critical info is missing. Empty array if info is sufficient."]
+}`;
+
+    try {
+      const response = await this.groq.chat.completions.create({
+        messages: [{ role: 'user', content: prompt }],
+        model: MODELS.QUERY_EXPANSION,
+        temperature: 0.1,
+        response_format: { type: 'json_object' }
+      });
+
+      return JSON.parse(response.choices[0]?.message?.content || '{"isEligible": true, "reasoning": "Insufficient context to completely rule out eligibility. Recommend discussing with your provider."}');
+    } catch (error) {
+      console.error('LLM Eligibility Error:', error.message);
+      return { isEligible: true, reasoning: 'Could not automatically determine eligibility. Please review criteria manually.' };
+    }
+  }
+
+  geoCoordsCache = new Map();
+
+  /**
+   * Extract approximate coordinates for an array of location strings
+   */
+  async extractCoordinatesBatch(locationsList) {
+    if (!this.groq || !locationsList || locationsList.length === 0) return [];
+
+    const results = [];
+    const uncached = [];
+
+    for (const loc of locationsList) {
+      if (this.geoCoordsCache.has(loc)) {
+        const cached = this.geoCoordsCache.get(loc);
+        if (cached) results.push({ location: loc, lat: cached.lat, lng: cached.lng });
+      } else {
+        uncached.push(loc);
+      }
+    }
+
+    if (uncached.length === 0) return results;
+
+    const prompt = `You are a geographical coordinate extractor. Given a list of location strings (e.g. cities, hospitals), return approximate latitude and longitude coordinates for each. Keep original strings matching perfectly.
+
+Locations: ${JSON.stringify(uncached)}
+
+Return ONLY valid JSON matching this schema:
+{
+  "coordinates": [
+    { "location": "string", "lat": number, "lng": number }
+  ]
+}`; // keep prompt formatting
+
+    try {
+      const response = await this.groq.chat.completions.create({
+        messages: [{ role: 'user', content: prompt }],
+        model: MODELS.QUERY_EXPANSION,
+        temperature: 0,
+        response_format: { type: "json_object" }
+      });
+      const parsed = JSON.parse(response.choices[0]?.message?.content || '{"coordinates":[]}');
+      const newCoords = parsed.coordinates || [];
+
+      newCoords.forEach(c => {
+        if (c && c.location) {
+          this.geoCoordsCache.set(c.location, { lat: c.lat, lng: c.lng });
+          results.push(c);
+        }
+      });
+      return results;
+    } catch (err) {
+      console.error('LLM Coordinate Extractor Error:', err.message);
+      return results; // Return whatever we found in cache
     }
   }
 }
-
 module.exports = new LLMService();

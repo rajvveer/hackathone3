@@ -18,6 +18,11 @@ const userSchema = new mongoose.Schema({
   picture: {
     type: String
   },
+  medicalProfile: {
+    patientName: String,
+    diseaseOfInterest: String,
+    location: String
+  },
   createdAt: {
     type: Date,
     default: Date.now

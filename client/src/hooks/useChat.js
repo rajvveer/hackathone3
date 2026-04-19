@@ -71,6 +71,7 @@ export function useChat() {
       const uiMessages = (data.messages || []).map(msg => ({
         role: msg.role,
         content: msg.content,
+        structuredInput: msg.structuredInput || null,
         // DB response structure matches what MessageBubble expects
         response: msg.response || null,
         pipelineMetrics: msg.pipelineMetrics || null,
@@ -88,6 +89,11 @@ export function useChat() {
   }, []);
 
   const startNewChat = useCallback(async () => {
+    // Prevent creating multiple empty chats if the current one is already empty
+    if (messages.length === 0 && currentConversationId) {
+      return currentConversationId;
+    }
+
     try {
       const data = await createConversation();
       if (!user) saveLocalId(data.conversationId);
@@ -98,9 +104,9 @@ export function useChat() {
       await loadConversations();
       return data.conversationId;
     } catch (e) {
-      console.error('Failed to create conversation:', e);
+      console.error('Failed to create new conversation:', e);
     }
-  }, [loadConversations]);
+  }, [user, messages.length, currentConversationId, loadConversations]);
 
   const removeConversation = useCallback(async (id) => {
     try {
@@ -231,6 +237,7 @@ export function useChat() {
       const userMsg = {
         role: 'user',
         content: `🏥 ${input.patientName ? input.patientName + ' — ' : ''}${input.disease}${input.query ? ' → ' + input.query : ''}${input.location ? ' 📍 ' + input.location : ''}`,
+        structuredInput: input,
         timestamp: new Date()
       };
       setMessages(prev => [...prev, userMsg]);

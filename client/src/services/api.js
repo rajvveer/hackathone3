@@ -177,3 +177,21 @@ export async function uploadMedicalFile(conversationId, file, userQuery = '') {
   }
   return res.json();
 }
+
+export async function getProfile() {
+  const res = await fetch(`${API_BASE}/auth/profile`, {
+    headers: getAuthHeaders()
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function updateProfile(medicalProfile) {
+  const res = await fetch(`${API_BASE}/auth/profile`, {
+    method: 'PUT',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ medicalProfile })
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}

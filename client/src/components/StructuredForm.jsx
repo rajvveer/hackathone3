@@ -8,6 +8,8 @@ export default function StructuredForm({ onSubmit, disabled }) {
     location: ''
   });
 
+  const [focused, setFocused] = useState(null);
+
   const handleChange = (field, value) => {
     setForm(prev => ({ ...prev, [field]: value }));
   };
@@ -19,54 +21,117 @@ export default function StructuredForm({ onSubmit, disabled }) {
     setForm({ patientName: '', disease: '', query: '', location: '' });
   };
 
+  const fields = [
+    {
+      id: 'sf-disease',
+      field: 'disease',
+      label: 'Disease of Interest',
+      placeholder: "e.g., Parkinson's disease",
+      required: true,
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.3"/>
+          <path d="M8 5V11M5 8H11" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+        </svg>
+      ),
+    },
+    {
+      id: 'sf-query',
+      field: 'query',
+      label: 'Treatment / Query',
+      placeholder: 'e.g., Deep Brain Stimulation',
+      required: false,
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.3"/>
+          <path d="M11 11L14 14" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+        </svg>
+      ),
+    },
+    {
+      id: 'sf-patient',
+      field: 'patientName',
+      label: 'Patient Name',
+      placeholder: 'e.g., John Smith',
+      required: false,
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <circle cx="8" cy="5" r="3" stroke="currentColor" strokeWidth="1.3"/>
+          <path d="M3 14C3 11.24 5.24 9 8 9C10.76 9 13 11.24 13 14" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+        </svg>
+      ),
+    },
+    {
+      id: 'sf-location',
+      field: 'location',
+      label: 'Location',
+      placeholder: 'e.g., Toronto, Canada',
+      required: false,
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M8 1.5C5.24 1.5 3 3.74 3 6.5C3 10.25 8 14.5 8 14.5C8 14.5 13 10.25 13 6.5C13 3.74 10.76 1.5 8 1.5Z" stroke="currentColor" strokeWidth="1.3"/>
+          <circle cx="8" cy="6.5" r="2" stroke="currentColor" strokeWidth="1.3"/>
+        </svg>
+      ),
+    },
+  ];
+
+  const isValid = form.disease.trim().length > 0;
+
   return (
     <form className="structured-form" onSubmit={handleSubmit}>
+      <div className="sf-header">
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
+          <rect x="2" y="2" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
+          <rect x="9" y="2" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
+          <rect x="2" y="9" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
+          <rect x="9" y="9" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
+        </svg>
+        <span>Structured Research Query</span>
+      </div>
       <div className="form-grid">
-        <div className="form-group">
-          <label htmlFor="sf-patient">Patient Name (Optional)</label>
-          <input
-            id="sf-patient"
-            type="text"
-            placeholder="e.g., John Smith"
-            value={form.patientName}
-            onChange={e => handleChange('patientName', e.target.value)}
-          />
-        </div>
-        <div className="form-group">
-          <label htmlFor="sf-location">Location (Optional)</label>
-          <input
-            id="sf-location"
-            type="text"
-            placeholder="e.g., Toronto, Canada"
-            value={form.location}
-            onChange={e => handleChange('location', e.target.value)}
-          />
-        </div>
-        <div className="form-group">
-          <label htmlFor="sf-disease">Disease of Interest *</label>
-          <input
-            id="sf-disease"
-            type="text"
-            placeholder="e.g., Parkinson's disease"
-            value={form.disease}
-            onChange={e => handleChange('disease', e.target.value)}
-            required
-          />
-        </div>
-        <div className="form-group">
-          <label htmlFor="sf-query">Treatment / Query</label>
-          <input
-            id="sf-query"
-            type="text"
-            placeholder="e.g., Deep Brain Stimulation"
-            value={form.query}
-            onChange={e => handleChange('query', e.target.value)}
-          />
-        </div>
+        {fields.map((f) => (
+          <div key={f.id} className={`form-group-v2 ${focused === f.field ? 'focused' : ''} ${f.required ? 'required' : ''}`}>
+            <label htmlFor={f.id}>
+              {f.icon}
+              {f.label}
+              {f.required && <span className="required-star">*</span>}
+            </label>
+            <input
+              id={f.id}
+              type="text"
+              placeholder={f.placeholder}
+              value={form[f.field]}
+              onChange={e => handleChange(f.field, e.target.value)}
+              onFocus={() => setFocused(f.field)}
+              onBlur={() => setFocused(null)}
+              required={f.required}
+            />
+          </div>
+        ))}
       </div>
       <div className="form-actions">
-        <button type="submit" className="form-submit-btn" disabled={disabled || !form.disease.trim()} id="structured-submit-btn">
-          🔬 Research Now
+        <div className="form-hint">
+          {isValid ? (
+            <span className="hint-ready">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8.5L6.5 12L13 4" stroke="#34d399" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              Ready to research
+            </span>
+          ) : (
+            <span className="hint-required">Enter a disease to begin</span>
+          )}
+        </div>
+        <button
+          type="submit"
+          className={`form-submit-btn ${isValid ? 'ready' : ''}`}
+          disabled={disabled || !isValid}
+          id="structured-submit-btn"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.3"/>
+            <path d="M6 8L8 6L10 8M8 6V11" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          Research Now
         </button>
       </div>
     </form>

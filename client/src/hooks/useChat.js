@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { sendMessageStream, getConversations, getConversation, createConversation, deleteConversation } from '../services/api';
+import { sendMessageStream, requestClarification, getConversations, getConversation, createConversation, deleteConversation, loginWithGoogle, migrateConversations } from '../services/api';
+import { jwtDecode } from 'jwt-decode';
 
 export function useChat() {
   const [messages, setMessages] = useState([]);
@@ -12,7 +13,41 @@ export function useChat() {
   const [retrievalStats, setRetrievalStats] = useState(null);
   const messagesEndRef = useRef(null);
 
-  useEffect(() => { loadConversations(); }, []);
+  // Follow-up questions state
+  const [followUp, setFollowUp] = useState(null);
+  // followUp shape: { originalQuery, questions, currentIndex, answers }
+
+  const [user, setUser] = useState(() => {
+    const token = localStorage.getItem('curalink-token');
+    if (token) {
+      try {
+        return jwtDecode(token);
+      } catch (e) {
+        localStorage.removeItem('curalink-token');
+      }
+    }
+    return null;
+  });
+
+  const getLocalIds = () => {
+    try { return JSON.parse(localStorage.getItem('curalink-anonymous-ids') || '[]'); } 
+    catch { return []; }
+  };
+  
+  const saveLocalId = (id) => {
+    const ids = getLocalIds();
+    if (!ids.includes(id)) {
+      ids.push(id);
+      localStorage.setItem('curalink-anonymous-ids', JSON.stringify(ids));
+    }
+  };
+  
+  const removeLocalId = (id) => {
+    const ids = getLocalIds();
+    localStorage.setItem('curalink-anonymous-ids', JSON.stringify(ids.filter(i => i !== id)));
+  };
+
+  useEffect(() => { loadConversations(); }, [user]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -20,12 +55,12 @@ export function useChat() {
 
   const loadConversations = useCallback(async () => {
     try {
-      const data = await getConversations();
+      const data = await getConversations(user ? [] : getLocalIds());
       setConversations(data);
     } catch (e) {
       console.error('Failed to load conversations:', e);
     }
-  }, []);
+  }, [user]);
 
   const loadConversation = useCallback(async (id) => {
     try {
@@ -55,6 +90,7 @@ export function useChat() {
   const startNewChat = useCallback(async () => {
     try {
       const data = await createConversation();
+      if (!user) saveLocalId(data.conversationId);
       setCurrentConversationId(data.conversationId);
       setMessages([]);
       setExpandedQueries([]);
@@ -69,6 +105,7 @@ export function useChat() {
   const removeConversation = useCallback(async (id) => {
     try {
       await deleteConversation(id);
+      if (!user) removeLocalId(id);
       if (currentConversationId === id) {
         setCurrentConversationId(null);
         setMessages([]);
@@ -81,29 +118,124 @@ export function useChat() {
     }
   }, [currentConversationId, loadConversations]);
 
+  const loginUser = useCallback(async (credential) => {
+    try {
+      const data = await loginWithGoogle(credential);
+      localStorage.setItem('curalink-token', data.token);
+      // Try to migrate local chats to the DB before setting user
+      const localIds = getLocalIds();
+      if (localIds.length > 0) {
+         try {
+            await migrateConversations(localIds);
+            localStorage.removeItem('curalink-anonymous-ids');
+         } catch (err) {
+            console.error('Migration failed:', err);
+         }
+      }
+      setUser(jwtDecode(data.token));
+      // Reload conversations implicitly happens via useEffect since user changed
+    } catch (e) {
+      console.error('Login failed', e);
+      throw e;
+    }
+  }, []);
+
+  const logoutUser = useCallback(() => {
+    localStorage.removeItem('curalink-token');
+    setUser(null);
+    setConversations([]);
+    setMessages([]);
+    setCurrentConversationId(null);
+  }, []);
+
   /**
-   * Send a message using the SSE streaming endpoint.
-   * Loading steps are server-driven (accurate to actual pipeline progress).
+   * Send a message — first requests follow-up clarification questions,
+   * then after user answers, sends enriched query to the pipeline.
    */
   const send = useCallback(async (input, isStructured = false) => {
     if (loading) return;
 
-    let convId = currentConversationId;
-    if (!convId) {
-      const data = await createConversation();
-      convId = data.conversationId;
-      setCurrentConversationId(convId);
+    // Structured queries skip clarification (already have full context)
+    if (isStructured) {
+      return sendToResearchPipeline(input, true);
     }
 
     // Add user message immediately
     const userMsg = {
       role: 'user',
-      content: isStructured
-        ? `🏥 ${input.patientName ? input.patientName + ' — ' : ''}${input.disease}${input.query ? ' → ' + input.query : ''}${input.location ? ' 📍 ' + input.location : ''}`
-        : input,
+      content: input,
       timestamp: new Date()
     };
     setMessages(prev => [...prev, userMsg]);
+    setLoading(true);
+
+    try {
+      // Request clarification questions from backend
+      const clarifyResult = await requestClarification(input);
+
+      if (clarifyResult.type === 'conversational') {
+        // Conversational (greeting) — show reply directly
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: clarifyResult.content,
+          response: null,
+          pipelineMetrics: null,
+          isNew: true,
+          timestamp: new Date()
+        }]);
+        setLoading(false);
+        return;
+      }
+
+      if (clarifyResult.type === 'clarification' && clarifyResult.questions?.length > 0) {
+        // Show follow-up questions
+        setFollowUp({
+          originalQuery: input,
+          questions: clarifyResult.questions,
+          currentIndex: 0,
+          answers: []
+        });
+        setLoading(false);
+        return;
+      }
+
+      // Fallback: no questions generated, go straight to pipeline
+      setLoading(false);
+      return sendToResearchPipeline(input, false);
+    } catch (e) {
+      console.error('Clarification error:', e);
+      // On error, fall through to normal pipeline
+      setLoading(false);
+      return sendToResearchPipeline(input, false);
+    }
+  }, [loading]);
+
+
+
+  /**
+   * Send query to the SSE streaming research pipeline.
+   */
+  const sendToResearchPipeline = useCallback(async (input, isStructured = false) => {
+    let convId = currentConversationId;
+    if (!convId) {
+      const data = await createConversation();
+      convId = data.conversationId;
+      if (!user) saveLocalId(convId);
+      setCurrentConversationId(convId);
+    }
+
+    // For enriched queries (post-follow-up), add user message if not already shown
+    if (typeof input === 'string' && input.includes('\nAdditional Context:')) {
+      // Don't add another user message — original was already added
+    } else if (isStructured) {
+      const userMsg = {
+        role: 'user',
+        content: `🏥 ${input.patientName ? input.patientName + ' — ' : ''}${input.disease}${input.query ? ' → ' + input.query : ''}${input.location ? ' 📍 ' + input.location : ''}`,
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, userMsg]);
+    }
+
     setLoading(true);
     setLoadingStep(1);
     setStepMessage('Expanding query with AI...');
@@ -120,7 +252,6 @@ export function useChat() {
             setStepMessage(data.message || '');
             break;
           case 'expanded':
-            // Show expanded queries ASAP
             setExpandedQueries(data.queries || []);
             break;
           case 'retrieved':
@@ -185,7 +316,64 @@ export function useChat() {
       setLoadingStep(0);
       setStepMessage('');
     }
-  }, [currentConversationId, loading, loadConversations]);
+  }, [currentConversationId, loadConversations]);
+
+  /**
+   * Submit follow-up answer and advance to next question or trigger research.
+   */
+  const submitFollowUpAnswer = useCallback((answer) => {
+    if (!followUp) return;
+    const newAnswers = [...followUp.answers, answer];
+    const nextIndex = followUp.currentIndex + 1;
+
+    if (nextIndex >= followUp.questions.length) {
+      // All questions answered — trigger research with enriched context
+      const enrichedQuery = buildEnrichedQuery(followUp.originalQuery, followUp.questions, newAnswers);
+      setFollowUp(null); // Clear follow-up
+      sendToResearchPipeline(enrichedQuery, false);
+    } else {
+      setFollowUp({ ...followUp, currentIndex: nextIndex, answers: newAnswers });
+    }
+  }, [followUp, sendToResearchPipeline]);
+
+  /**
+   * Go back to a previous question in the follow-up flow.
+   */
+  const goBackFollowUp = useCallback(() => {
+    setFollowUp(prev => {
+      if (!prev || prev.currentIndex === 0) return prev;
+      const newAnswers = prev.answers.slice(0, -1);
+      return { ...prev, currentIndex: prev.currentIndex - 1, answers: newAnswers };
+    });
+  }, []);
+
+  /**
+   * Skip follow-up questions and go straight to research with original query.
+   */
+  const skipFollowUp = useCallback(() => {
+    const originalQuery = followUp?.originalQuery;
+    setFollowUp(null);
+    if (originalQuery) {
+      sendToResearchPipeline(originalQuery, false);
+    }
+  }, [followUp]);
+
+  /**
+   * Build an enriched query string from original query + follow-up answers.
+   */
+  function buildEnrichedQuery(originalQuery, questions, answers) {
+    let enriched = originalQuery;
+    const contextParts = [];
+    questions.forEach((q, i) => {
+      if (answers[i]) {
+        contextParts.push(`${q.question}: ${answers[i]}`);
+      }
+    });
+    if (contextParts.length > 0) {
+      enriched += '\n\nAdditional Context:\n' + contextParts.join('\n');
+    }
+    return enriched;
+  }
 
   return {
     messages,
@@ -200,6 +388,14 @@ export function useChat() {
     send,
     startNewChat,
     loadConversation,
-    removeConversation
+    removeConversation,
+    user,
+    loginUser,
+    logoutUser,
+    // Follow-up questions
+    followUp,
+    submitFollowUpAnswer,
+    goBackFollowUp,
+    skipFollowUp
   };
 }

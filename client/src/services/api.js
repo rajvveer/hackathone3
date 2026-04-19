@@ -1,9 +1,17 @@
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
+function getAuthHeaders(extraHeaders = {}) {
+  const token = localStorage.getItem('curalink-token');
+  return {
+    ...extraHeaders,
+    ...(token ? { Authorization: `Bearer ${token}` } : {})
+  };
+}
+
 export async function sendMessage(conversationId, message) {
   const res = await fetch(`${API_BASE}/chat`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ message, conversationId })
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
@@ -13,7 +21,7 @@ export async function sendMessage(conversationId, message) {
 export async function sendStructuredQuery(conversationId, formData) {
   const res = await fetch(`${API_BASE}/chat`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ structured: formData, conversationId })
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
@@ -31,7 +39,7 @@ export async function* sendMessageStream(conversationId, input, isStructured = f
 
   const response = await fetch(`${API_BASE}/chat/stream`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body)
   });
 
@@ -68,26 +76,53 @@ export async function* sendMessageStream(conversationId, input, isStructured = f
   }
 }
 
-export async function getConversations() {
-  const res = await fetch(`${API_BASE}/conversations`);
+/**
+ * Request follow-up clarification questions for a medical query
+ */
+export async function requestClarification(message) {
+  const res = await fetch(`${API_BASE}/chat/clarify`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ message })
+  });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
 
+export async function getConversations(localIds = []) {
+  const query = localIds.length > 0 ? `?ids=${localIds.join(',')}` : '';
+  const res = await fetch(`${API_BASE}/conversations${query}`, {
+    headers: getAuthHeaders()
+  });
+  if (!res.ok) {
+    if (res.status === 401) return []; // Unauth ok
+    throw new Error(`API error: ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function getConversation(id) {
-  const res = await fetch(`${API_BASE}/conversations/${id}`);
+  const res = await fetch(`${API_BASE}/conversations/${id}`, {
+    headers: getAuthHeaders()
+  });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
 
 export async function createConversation() {
-  const res = await fetch(`${API_BASE}/conversations/new`, { method: 'POST' });
+  const res = await fetch(`${API_BASE}/conversations/new`, {
+    method: 'POST',
+    headers: getAuthHeaders()
+  });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
 
 export async function deleteConversation(id) {
-  const res = await fetch(`${API_BASE}/conversations/${id}`, { method: 'DELETE' });
+  const res = await fetch(`${API_BASE}/conversations/${id}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders()
+  });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
@@ -95,5 +130,25 @@ export async function deleteConversation(id) {
 export async function checkHealth() {
   const res = await fetch(`${API_BASE}/health`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function loginWithGoogle(credential) {
+  const res = await fetch(`${API_BASE}/auth/google`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ credential })
+  });
+  if (!res.ok) throw new Error(`Login failed: ${res.status}`);
+  return res.json();
+}
+
+export async function migrateConversations(localIds) {
+  const res = await fetch(`${API_BASE}/conversations/migrate`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ localIds })
+  });
+  if (!res.ok) throw new Error(`Migration failed: ${res.status}`);
   return res.json();
 }

@@ -1,5 +1,9 @@
 const Groq = require('groq-sdk');
+const { toFile } = require('groq-sdk');
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 const { MODELS } = require('../config/constants');
 
 class LLMService {
@@ -46,7 +50,8 @@ class LLMService {
     const params = { model, messages, temperature, max_tokens: maxTokens };
     if (jsonMode) params.response_format = { type: 'json_object' };
 
-    const completion = await this.groq.chat.completions.create(params);
+    // Prevent Groq from hanging indefinitely on rate limits or API outages
+    const completion = await this.groq.chat.completions.create(params, { timeout: 10000 });
     return completion.choices[0]?.message?.content || '';
   }
 
@@ -59,7 +64,7 @@ class LLMService {
       prompt: systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt,
       stream: false,
       options: { temperature }
-    }, { timeout: 120000 });
+    }, { timeout: 30000 }); // Fail fast if local Ollama is hanging
 
     return response.data.response || '';
   }
@@ -171,6 +176,71 @@ Generate expanded search queries as JSON:
         clinicalTrials: disease || query
       }
     };
+  }
+
+  /**
+   * Generate follow-up clarifying questions for a medical query.
+   * If the query is detailed enough, it bypasses clarification.
+   */
+  async generateFollowUpQuestions(userQuery) {
+    const systemPrompt = `You are a medical intake assistant for Curalink, an AI Medical Research Assistant.
+Your job is to analyze the user's query and decide if it provides enough specific context to run a detailed medical research pipeline (PubMed and Clinicaltrials.gov).
+
+RULES:
+1. "needsClarification" must be FALSE if the query specifies WHAT they are looking for (e.g., "Latest treatment for lung cancer", "clinical trials for diabetes", "causes of headache", "research on asthma"). The AI pipeline is powerful enough to handle these!
+2. "needsClarification" should ONLY be TRUE if the query is extremely vague, just a lone symptom, or just a disease name (e.g., "headache", "lung cancer", "my stomach hurts", "pain").
+3. If needsClarification is true, generate exactly 3-4 follow-up questions to gather more context.
+4. Each generated question should have 4-5 clickable options. Options should be short (2-6 words max).
+5. For vague queries, cover these areas IN ORDER:
+   - What specifically they want to know (treatments, research, trials, causes)
+   - Who is this for (age group/patient context)
+   - Any specific aspect or subtype
+   - Geographic preference for trials (optional)
+6. Respond ONLY in valid JSON. No markdown.`;
+
+    const prompt = `User Query: "${userQuery}"
+
+Generate JSON response:
+{
+  "needsClarification": true or false,
+  "questions": [
+    {
+      "question": "What would you like to know about [topic]?",
+      "options": ["Option 1", "Option 2", "Option 3", "Option 4"]
+    }
+  ]
+}`;
+
+    try {
+      const result = await this.generate(prompt, {
+        model: MODELS.QUERY_EXPANSION,
+        systemPrompt,
+        temperature: 0.3,
+        maxTokens: 1024,
+        jsonMode: true
+      });
+      const parsed = JSON.parse(result);
+      return parsed;
+    } catch (e) {
+      console.error('Follow-up question generation failed:', e.message);
+      // Fallback: generic questions
+      return {
+        questions: [
+          {
+            question: `What would you like to know about "${userQuery}"?`,
+            options: ['Latest treatments', 'Recent research', 'Clinical trials', 'Causes & prevention', 'Diagnosis methods']
+          },
+          {
+            question: 'Who is this research for?',
+            options: ['Myself (adult)', 'Child/pediatric', 'Elderly parent', 'General research', 'Medical professional']
+          },
+          {
+            question: 'What type of information is most important?',
+            options: ['Evidence-based studies', 'Treatment comparisons', 'Side effects & risks', 'Expert opinions', 'Patient outcomes']
+          }
+        ]
+      };
+    }
   }
 
   /**
@@ -291,6 +361,112 @@ Based on the above research data, provide a highly concise, personalized medical
         personalizedRecommendation: 'Please consult with a qualified healthcare provider for personalized medical advice based on these research findings.',
         keyFindings: publications.slice(0, 4).map(p => `${p.title} (${p.year})`)
       };
+    }
+  }
+
+  /**
+   * Generates a streaming voice response.
+   * Yields text chunks instantly as they arrive from Groq.
+   */
+  async *generateVoiceResponseStream(query, publications = [], clinicalTrials = [], conversationHistory = []) {
+    if (!this.groq) throw new Error('Groq client not initialized for streaming');
+
+    const systemPrompt = `You are Dr. Curalink, a highly skilled AI medical research physician in a real-time voice consultation.
+
+YOUR PERSONALITY:
+- Warm, confident, empathetic — like a senior doctor in a clinic
+- Use simple language anyone can understand
+- Sound natural and human, like a real conversation
+
+HOW TO ANSWER:
+1. Briefly acknowledge their question (1 sentence)
+2. Give a clear overview of the topic (2-3 sentences)
+3. Share 2-3 KEY INSIGHTS from the research — describe WHAT was found, not WHO found it. Say things like "Recent studies show that..." or "New research suggests..." NEVER read out author names, journal names, or study titles
+4. If relevant trials exist, mention them generally: "There are active clinical trials exploring this approach"
+5. End with ONE follow-up question: "Would you like more details on the treatments, or should I look into clinical trials for you?"
+
+CRITICAL VOICE RULES:
+- SHORT clear sentences (under 20 words). End every sentence with a period.
+- NO markdown, NO asterisks, NO bullet points, NO numbered lists, NO special characters
+- NEVER read out author names, paper titles, or institution names — just describe the findings
+- Keep response 120-180 words
+- ALWAYS end with a follow-up question giving the patient choices
+- This is SPOKEN output — it must sound natural when read aloud by TTS`;
+
+    // Provide research context WITHOUT author names to prevent AI from reading them
+    const pubContext = publications.slice(0, 5).map((p, i) =>
+      `${i+1}. Finding: ${p.title} (${p.year || 'Recent'}) — ${p.abstract?.substring(0, 200) || 'No details'}`
+    ).join('\n');
+
+    const trialContext = clinicalTrials.slice(0, 3).map((t, i) =>
+      `${i+1}. Trial: ${t.title} — Phase: ${t.phase || 'N/A'}, Status: ${t.status}`
+    ).join('\n');
+
+    const historyContext = conversationHistory.length > 0
+      ? `\nPrevious conversation:\n${conversationHistory.map(m => `${m.role}: ${m.content}`).join('\n')}`
+      : '';
+
+    const prompt = `Patient asked: "${query}"
+${historyContext}
+
+=== RESEARCH FINDINGS (for your reference only — do NOT read these verbatim) ===
+Key publications (${publications.length} found):
+${pubContext || 'None found'}
+
+Clinical Trials (${clinicalTrials.length} found):
+${trialContext || 'None found'}
+
+Analyze these findings and respond as Dr. Curalink. Describe the insights in your own words — do NOT read study titles or author names aloud. End with a follow-up question.`;
+
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: prompt }
+    ];
+
+    try {
+      const stream = await this.groq.chat.completions.create({
+        model: MODELS.REASONING,
+        messages,
+        temperature: 0.6,
+        max_tokens: 800,
+        stream: true,
+      });
+
+      for await (const chunk of stream) {
+        const content = chunk.choices[0]?.delta?.content || '';
+        if (content) {
+          yield content.replace(/[*_#`~\[\]]/g, '');
+        }
+      }
+    } catch (e) {
+      console.error('Voice LLM Stream error:', e.message);
+      yield " I'm sorry, I encountered a technical issue. Could you please repeat your question? ";
+    }
+  }
+
+  /**
+   * Transcribe audio buffer using Groq Whisper.
+   * Saves to temp file first for reliable file handling.
+   */
+  async transcribeAudio(audioBuffer, filename = 'audio.webm') {
+    if (!this.groq) throw new Error('Groq client not initialized');
+
+    const tmpPath = path.join(os.tmpdir(), `curalink_voice_${Date.now()}.webm`);
+    fs.writeFileSync(tmpPath, audioBuffer);
+    console.log(`🎤 Saved temp audio: ${tmpPath} (${audioBuffer.length} bytes)`);
+
+    try {
+      const transcription = await this.groq.audio.transcriptions.create({
+        file: fs.createReadStream(tmpPath),
+        model: 'whisper-large-v3-turbo',
+        response_format: 'text',
+        language: 'en',
+      });
+
+      return typeof transcription === 'string' ? transcription : transcription.text || '';
+    } finally {
+      // Clean up temp file
+      try { fs.unlinkSync(tmpPath); } catch (_) {}
     }
   }
 }

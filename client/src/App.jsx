@@ -1,28 +1,63 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useChat } from './hooks/useChat';
 import Sidebar from './components/Sidebar';
 import MessageBubble from './components/MessageBubble';
 import LoadingState from './components/LoadingState';
 import StructuredForm from './components/StructuredForm';
+import FollowUpQuestions from './components/FollowUpQuestions';
+import VoiceAssistant from './components/VoiceAssistant';
 import './index.css';
 
 const QUICK_ACTIONS = [
-  { icon: '🫁', text: 'Latest treatment for lung cancer' },
-  { icon: '💉', text: 'Clinical trials for diabetes' },
-  { icon: '🧠', text: 'Top researchers in Alzheimer\'s disease' },
-  { icon: '❤️', text: 'Recent studies on heart disease' },
+  { icon: '🫁', label: 'Lung Cancer', text: 'Latest treatment for lung cancer' },
+  { icon: '💉', label: 'Diabetes', text: 'Clinical trials for diabetes' },
+  { icon: '🧠', label: "Alzheimer's", text: "Top researchers in Alzheimer's disease" },
+  { icon: '❤️', label: 'Heart Disease', text: 'Recent studies on heart disease' },
+  { icon: '🧬', label: 'Gene Therapy', text: 'Latest gene therapy breakthroughs' },
+  { icon: '🦠', label: 'Immunotherapy', text: 'Cancer immunotherapy clinical trials' },
 ];
+
+function getGreeting() {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  return 'Good evening';
+}
 
 export default function App() {
   const {
     messages, conversations, currentConversationId,
     loading, loadingStep, stepMessage, expandedQueries, retrievalStats,
-    messagesEndRef, send, startNewChat, loadConversation, removeConversation
+    messagesEndRef, send, startNewChat, loadConversation, removeConversation,
+    user, loginUser, logoutUser,
+    followUp, submitFollowUpAnswer, goBackFollowUp, skipFollowUp
   } = useChat();
 
   const [inputMode, setInputMode] = useState('chat');
   const [inputValue, setInputValue] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const textareaRef = useRef(null);
+  const [voiceMode, setVoiceMode] = useState(false);
+
+  // Theme: dark / light
+  const [theme, setTheme] = useState(() => {
+    return localStorage.getItem('curalink-theme') || 'light';
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('curalink-theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => setTheme(prev => prev === 'light' ? 'dark' : 'light');
+
+  // Auto-resize textarea
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
+    }
+  }, [inputValue]);
 
   const handleSend = () => {
     const trimmed = inputValue.trim();
@@ -58,14 +93,28 @@ export default function App() {
         onDeleteConversation={removeConversation}
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
+        user={user}
+        loginUser={loginUser}
+        logoutUser={logoutUser}
       />
 
       <main className="main-area">
         {/* Header */}
         <header className="main-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <button className="sidebar-toggle" onClick={() => setSidebarOpen(!sidebarOpen)}>☰</button>
-            <h2 style={{ fontSize: 16 }}>Curalink</h2>
+          <div className="header-left">
+            <button className="sidebar-toggle" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle sidebar">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <path d="M3 7H21M3 12H21M3 17H21" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+              </svg>
+            </button>
+            <div className="header-brand">
+              <h2>Curalink</h2>
+              {messages.length > 0 && (
+                <span className="header-subtitle">
+                  {messages.filter(m => m.role === 'user').length} {messages.filter(m => m.role === 'user').length === 1 ? 'query' : 'queries'} this session
+                </span>
+              )}
+            </div>
           </div>
           <div className="header-actions">
             <div className="mode-toggle">
@@ -74,35 +123,73 @@ export default function App() {
                 onClick={() => setInputMode('chat')}
                 id="mode-chat"
               >
-                💬 Chat
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                  <path d="M14 10C14 10.35 13.86 10.69 13.61 10.94C13.36 11.19 13.02 11.33 12.67 11.33H5.33L2 14.67V3.33C2 2.98 2.14 2.64 2.39 2.39C2.64 2.14 2.98 2 3.33 2H12.67C13.02 2 13.36 2.14 13.61 2.39C13.86 2.64 14 2.98 14 3.33V10Z" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                Chat
               </button>
               <button
                 className={inputMode === 'structured' ? 'active' : ''}
                 onClick={() => setInputMode('structured')}
                 id="mode-structured"
               >
-                📋 Structured
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                  <rect x="2" y="2" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
+                  <rect x="9" y="2" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
+                  <rect x="2" y="9" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
+                  <rect x="9" y="9" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
+                </svg>
+                Structured
               </button>
             </div>
+
+            {/* Theme Toggle */}
+            <button
+              className="theme-toggle"
+              onClick={toggleTheme}
+              aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
+              id="theme-toggle"
+            >
+              <div className="theme-toggle-track">
+                <div className="theme-toggle-thumb">
+                  <span className="theme-toggle-icon">
+                    {theme === 'light' ? '☀️' : '🌙'}
+                  </span>
+                </div>
+              </div>
+            </button>
           </div>
         </header>
 
         {/* Live pipeline info banner — shows during loading */}
         {loading && expandedQueries.length > 0 && (
           <div className="pipeline-banner">
-            <span className="pipeline-banner-label">🔍 Searching:</span>
-            <div className="pipeline-queries">
-              {expandedQueries.map((q, i) => (
-                <span key={i} className="pipeline-query-tag">{q}</span>
-              ))}
-            </div>
-            {retrievalStats && (
-              <div className="pipeline-live-stats">
-                <span>📚 {retrievalStats.openAlex + retrievalStats.pubmed} pubs</span>
-                <span>🧪 {retrievalStats.trials} trials</span>
-                {retrievalStats.fromCache && <span>⚡ {retrievalStats.fromCache} cache</span>}
+            <div className="pipeline-banner-inner">
+              <div className="pipeline-banner-left">
+                <div className="pipeline-pulse" />
+                <span className="pipeline-banner-label">Searching</span>
               </div>
-            )}
+              <div className="pipeline-queries">
+                {expandedQueries.map((q, i) => (
+                  <span key={i} className="pipeline-query-tag">{q}</span>
+                ))}
+              </div>
+              {retrievalStats && (
+                <div className="pipeline-live-stats">
+                  <span className="pipeline-stat">
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 13V7H5V13M6.5 13V3H9.5V13M11 13V9H14V13" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    {retrievalStats.openAlex + retrievalStats.pubmed} pubs
+                  </span>
+                  <span className="pipeline-stat">
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="6" r="4" stroke="currentColor" strokeWidth="1.2"/><path d="M4 14C4 11.79 5.79 10 8 10C10.21 10 12 11.79 12 14" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>
+                    {retrievalStats.trials} trials
+                  </span>
+                  {retrievalStats.fromCache && (
+                    <span className="pipeline-stat cache">⚡ {retrievalStats.fromCache}</span>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -110,19 +197,46 @@ export default function App() {
         <div className="messages-container">
           {messages.length === 0 && !loading && (
             <div className="welcome-screen">
-              <div className="welcome-icon">✨</div>
-              <h2>Good afternoon</h2>
+              <div className="welcome-hero">
+                <div className="welcome-icon-wrapper">
+                  <div className="welcome-icon-bg" />
+                  <div className="welcome-icon">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none">
+                      <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" fill="currentColor"/>
+                    </svg>
+                  </div>
+                </div>
+                <h2>{getGreeting()}</h2>
+                <p className="welcome-subtitle">
+                  What medical research would you like to explore today?
+                </p>
+              </div>
               <div className="quick-actions">
                 {QUICK_ACTIONS.map((action, i) => (
-                  <div
+                  <button
                     key={i}
                     className="quick-action"
                     onClick={() => handleQuickAction(action.text)}
                     id={`quick-action-${i}`}
+                    style={{ animationDelay: `${i * 60}ms` }}
                   >
-                    <div className="qa-text">{action.text}</div>
-                  </div>
+                    <span className="qa-icon">{action.icon}</span>
+                    <div className="qa-content">
+                      <span className="qa-label">{action.label}</span>
+                      <span className="qa-text">{action.text}</span>
+                    </div>
+                    <svg className="qa-arrow" width="14" height="14" viewBox="0 0 16 16" fill="none">
+                      <path d="M6 4L10 8L6 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
                 ))}
+              </div>
+              <div className="welcome-footer">
+                <span>Powered by</span>
+                <span className="welcome-badge">PubMed</span>
+                <span className="welcome-badge">OpenAlex</span>
+                <span className="welcome-badge">ClinicalTrials.gov</span>
+                <span className="welcome-badge">Llama 3 70B</span>
               </div>
             </div>
           )}
@@ -130,6 +244,17 @@ export default function App() {
           {messages.map((msg, i) => (
             <MessageBubble key={i} message={msg} />
           ))}
+
+          {/* Follow-up clarification questions */}
+          {followUp && (
+            <FollowUpQuestions
+              followUp={followUp}
+              onAnswer={submitFollowUpAnswer}
+              onGoBack={goBackFollowUp}
+              onSkip={skipFollowUp}
+              disabled={loading}
+            />
+          )}
 
           {loading && <LoadingState step={loadingStep} stepMessage={stepMessage} />}
 
@@ -139,11 +264,16 @@ export default function App() {
         {/* Input Area */}
         <div className="input-area">
           {inputMode === 'chat' ? (
-            <div className="input-wrapper">
+            <div className={`input-wrapper ${loading ? 'disabled' : ''}`}>
               <div className="input-field-wrapper">
+                <svg className="input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none">
+                  <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2"/>
+                  <path d="M16 16L21 21" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                </svg>
                 <textarea
+                  ref={textareaRef}
                   className="chat-input"
-                  placeholder="How can Curalink help you today?"
+                  placeholder="Ask about any disease, treatment, or clinical trial..."
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={handleKeyDown}
@@ -153,13 +283,28 @@ export default function App() {
                 />
               </div>
               <div className="input-actions">
+                <span className="input-hint">Enter ↵</span>
+                <button
+                  className="voice-toggle-btn"
+                  onClick={() => setVoiceMode(true)}
+                  title="Voice Mode"
+                  id="voice-mode-btn"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 1C10.34 1 9 2.34 9 4V12C9 13.66 10.34 15 12 15C13.66 15 15 13.66 15 12V4C15 2.34 13.66 1 12 1Z" fill="currentColor"/>
+                    <path d="M19 10V12C19 15.87 15.87 19 12 19C8.13 19 5 15.87 5 12V10" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                    <path d="M12 19V23M8 23H16" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                  </svg>
+                </button>
                 <button
                   className={`send-btn ${inputValue.trim() ? 'active' : ''}`}
                   onClick={handleSend}
                   disabled={loading || !inputValue.trim()}
                   id="send-btn"
                 >
-                  ↑
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <path d="M8 12V4M8 4L4 8M8 4L12 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
                 </button>
               </div>
             </div>
@@ -168,6 +313,14 @@ export default function App() {
           )}
         </div>
       </main>
+
+      {/* Voice Mode Modal */}
+      {voiceMode && (
+        <VoiceAssistant
+          onClose={() => setVoiceMode(false)}
+          onResearchData={(data) => console.log('Voice research data:', data)}
+        />
+      )}
     </div>
   );
 }

@@ -12,6 +12,7 @@ const researchCacheSchema = new mongoose.Schema({
   clinicalTrials: [mongoose.Schema.Types.Mixed],
   researchers: [mongoose.Schema.Types.Mixed],
   totalResults: Number,
+  metadata: mongoose.Schema.Types.Mixed,
   cachedAt: {
     type: Date,
     default: Date.now

@@ -47,13 +47,14 @@ function buildTrialResponse(trial) {
   };
 }
 
-async function loadOrCreateConversation(conversationId, userInput) {
+async function loadOrCreateConversation(conversationId, userInput, user) {
   let convId = conversationId || uuidv4();
   let conversation = await Conversation.findOne({ conversationId: convId });
 
   if (!conversation) {
     conversation = new Conversation({
       conversationId: convId,
+      userId: user ? user._id : undefined,
       title: typeof userInput === 'string'
         ? userInput.substring(0, 60)
         : (userInput.query || userInput.disease || 'New Research Chat'),
@@ -70,6 +71,11 @@ async function loadOrCreateConversation(conversationId, userInput) {
       diseaseOfInterest: userInput.disease || conversation.userProfile?.diseaseOfInterest || '',
       location: userInput.location || conversation.userProfile?.location || ''
     };
+  }
+
+  // Backwards compat: if user logs in on an anonymous session, claim it
+  if (user && !conversation.userId) {
+    conversation.userId = user._id;
   }
 
   return { conversation, convId };
@@ -141,7 +147,7 @@ exports.handleChat = async (req, res) => {
     const userInput = structured || message;
     if (!userInput) return res.status(400).json({ error: 'Message or structured input is required' });
 
-    const { conversation, convId } = await loadOrCreateConversation(conversationId, userInput);
+    const { conversation, convId } = await loadOrCreateConversation(conversationId, userInput, req.user);
     const context = getContext(conversation);
     const conversationHistory = getHistory(conversation);
 
@@ -202,8 +208,8 @@ exports.handleChat = async (req, res) => {
       clinicalTrials: ranked.clinicalTrials.map(buildTrialResponse),
       researchers: retrieval.researchers || [],
       pipelineMetrics: {
-        totalRetrieved: retrieval.metadata.totalBeforeDedup + retrieval.metadata.clinicalTrialsCount,
-        totalAfterDedup: retrieval.metadata.totalAfterDedup + retrieval.metadata.clinicalTrialsCount,
+        totalRetrieved: (retrieval.metadata.totalBeforeDedup || 0) + (retrieval.metadata.clinicalTrialsCount || 0) || retrieval.metadata.totalResults || 0,
+        totalAfterDedup: (retrieval.metadata.totalAfterDedup || 0) + (retrieval.metadata.clinicalTrialsCount || 0) || retrieval.metadata.totalResults || 0,
         selectedPublications: ranked.rankingMetrics.selectedPublications,
         selectedTrials: ranked.rankingMetrics.selectedTrials,
         queryExpansionTimeMs: expansion.timeMs,
@@ -258,7 +264,7 @@ exports.handleChatStream = async (req, res) => {
     const userInput = structured || message;
     if (!userInput) return finish('error', { message: 'Message is required' });
 
-    const { conversation, convId } = await loadOrCreateConversation(conversationId, userInput);
+    const { conversation, convId } = await loadOrCreateConversation(conversationId, userInput, req.user);
     const context = getContext(conversation);
     const conversationHistory = getHistory(conversation);
 
@@ -334,8 +340,8 @@ exports.handleChatStream = async (req, res) => {
       clinicalTrials: ranked.clinicalTrials.map(buildTrialResponse),
       researchers: retrieval.researchers || [],
       pipelineMetrics: {
-        totalRetrieved: retrieval.metadata.totalBeforeDedup + retrieval.metadata.clinicalTrialsCount,
-        totalAfterDedup: retrieval.metadata.totalAfterDedup + retrieval.metadata.clinicalTrialsCount,
+        totalRetrieved: (retrieval.metadata.totalBeforeDedup || 0) + (retrieval.metadata.clinicalTrialsCount || 0) || retrieval.metadata.totalResults || 0,
+        totalAfterDedup: (retrieval.metadata.totalAfterDedup || 0) + (retrieval.metadata.clinicalTrialsCount || 0) || retrieval.metadata.totalResults || 0,
         selectedPublications: ranked.rankingMetrics.selectedPublications,
         selectedTrials: ranked.rankingMetrics.selectedTrials,
         queryExpansionTimeMs: expansion.timeMs,
@@ -367,8 +373,11 @@ exports.handleChatStream = async (req, res) => {
 // ──────────────────────────────────────────────────────────────
 exports.getConversation = async (req, res) => {
   try {
-    const conversation = await Conversation.findOne({ conversationId: req.params.id }).lean();
-    if (!conversation) return res.status(404).json({ error: 'Conversation not found' });
+    const q = { conversationId: req.params.id };
+    if (req.user) q.userId = req.user._id;
+
+    const conversation = await Conversation.findOne(q).lean();
+    if (!conversation) return res.status(404).json({ error: 'Conversation not found or unauthorized' });
     res.json(conversation);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -377,7 +386,17 @@ exports.getConversation = async (req, res) => {
 
 exports.getConversations = async (req, res) => {
   try {
-    const conversations = await Conversation.find()
+    let query = {};
+    if (req.user) {
+      query = { userId: req.user._id };
+    } else {
+      const localIds = req.query.ids ? req.query.ids.split(',') : [];
+      if (localIds.length === 0) {
+        return res.json([]);
+      }
+      query = { conversationId: { $in: localIds } };
+    }
+    const conversations = await Conversation.find(query)
       .select('conversationId title metadata createdAt updatedAt')
       .sort({ updatedAt: -1 })
       .limit(50)
@@ -390,7 +409,11 @@ exports.getConversations = async (req, res) => {
 
 exports.createConversation = async (req, res) => {
   try {
-    const conversation = new Conversation({ conversationId: uuidv4(), title: 'New Conversation' });
+    const conversation = new Conversation({
+      conversationId: uuidv4(),
+      title: 'New Conversation',
+      userId: req.user ? req.user._id : undefined
+    });
     await conversation.save();
     res.json({ conversationId: conversation.conversationId });
   } catch (error) {
@@ -400,9 +423,72 @@ exports.createConversation = async (req, res) => {
 
 exports.deleteConversation = async (req, res) => {
   try {
-    await Conversation.deleteOne({ conversationId: req.params.id });
+    const q = { conversationId: req.params.id };
+    if (req.user) {
+      q.userId = req.user._id;
+    } else {
+      q.userId = { $exists: false }; // Anonymous can only delete unowned chats
+    }
+
+    const result = await Conversation.deleteOne(q);
+    if (result.deletedCount === 0) {
+       return res.status(404).json({ error: 'Conversation not found or unauthorized' });
+    }
     res.json({ success: true });
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+exports.migrateConversations = async (req, res) => {
+  try {
+    const { localIds } = req.body;
+    if (!req.user || !localIds || !Array.isArray(localIds)) {
+      return res.status(400).json({ error: 'Invalid payload or unauthenticated' });
+    }
+    // Update all these anonymous convos to belong to this user
+    await Conversation.updateMany(
+      { conversationId: { $in: localIds }, userId: { $exists: false } },
+      { $set: { userId: req.user._id } }
+    );
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ──────────────────────────────────────────────────────────────
+// POST /api/chat/clarify — Generate follow-up questions
+// ──────────────────────────────────────────────────────────────
+exports.handleClarification = async (req, res) => {
+  try {
+    const { message } = req.body;
+    if (!message) return res.status(400).json({ error: 'Message is required' });
+
+    // First check if it's conversational (greeting, etc.)
+    const classification = await llmService.classifyQuery(message);
+    if (!classification.requiresResearch) {
+      return res.json({
+        type: 'conversational',
+        content: classification.response || "Hello! I am Curalink. How can I help you with your health or research questions today?"
+      });
+    }
+
+    // Evaluate context and optionally generate follow-up questions
+    const followUp = await llmService.generateFollowUpQuestions(message);
+
+    // If query is detailed enough, skip clarification
+    if (followUp.needsClarification === false || !followUp.questions || followUp.questions.length === 0) {
+      return res.json({ type: 'sufficient_context' });
+    }
+
+    return res.json({
+      type: 'clarification',
+      originalQuery: message,
+      questions: followUp.questions || []
+    });
+  } catch (error) {
+    console.error('Clarification error:', error);
     res.status(500).json({ error: error.message });
   }
 };

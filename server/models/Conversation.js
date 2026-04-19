@@ -96,6 +96,12 @@ const conversationSchema = new mongoose.Schema({
     unique: true,
     index: true
   },
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: false,
+    index: true
+  },
   title: {
     type: String,
     default: 'New Conversation'

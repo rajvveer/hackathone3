@@ -169,7 +169,7 @@ class RetrievalManager {
           publications: cached.publications || [],
           clinicalTrials: cached.clinicalTrials || [],
           researchers: cached.researchers || [],
-          metadata: { fromCache: true, totalResults: cached.totalResults }
+          metadata: { ...cached.metadata, fromCache: 'mongodb', totalResults: cached.totalResults }
         };
       }
     } catch (e) {
@@ -189,6 +189,7 @@ class RetrievalManager {
           clinicalTrials: result.clinicalTrials,
           researchers: result.researchers || [],
           totalResults: result.publications.length + result.clinicalTrials.length,
+          metadata: result.metadata,
           cachedAt: new Date()
         },
         { upsert: true, new: true }

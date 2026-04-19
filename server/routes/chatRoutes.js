@@ -39,6 +39,7 @@ router.post('/chat/heatmap-coords', optionalAuth, chatController.getHeatmapCoord
 // Conversation management
 router.get('/conversations', optionalAuth, chatController.getConversations);
 router.get('/conversations/:id', optionalAuth, chatController.getConversation);
+router.get('/conversations/:id/export', optionalAuth, chatController.exportPDF);
 router.post('/conversations/new', optionalAuth, chatController.createConversation);
 router.post('/conversations/migrate', requireAuth, chatController.migrateConversations);
 router.delete('/conversations/:id', optionalAuth, chatController.deleteConversation);

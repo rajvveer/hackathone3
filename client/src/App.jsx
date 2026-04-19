@@ -91,13 +91,13 @@ export default function App() {
   // Determine if we need the Context Sidebar
   const activeContextMsg = messages.find(m => m.structuredInput);
   const activeResponseMsg = messages.find(m => m.response?.conditionOverview);
-  
+
   const showRightSidebar = !!activeContextMsg;
   const contextData = activeContextMsg?.structuredInput;
   const contextOverview = activeResponseMsg?.response?.conditionOverview;
-  
+
   // Try to find the latest valid retrieval stats out of the messages, or use live stats
-  const contextStats = retrievalStats || (activeResponseMsg?.pipelineMetrics ? { 
+  const contextStats = retrievalStats || (activeResponseMsg?.pipelineMetrics ? {
     pubmed: activeResponseMsg.response.publications?.length || 0,
     openAlex: 0,
     trials: activeResponseMsg.response.clinicalTrials?.length || 0
@@ -133,7 +133,7 @@ export default function App() {
           <div className="header-left">
             <button className="sidebar-toggle" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle sidebar">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                <path d="M3 7H21M3 12H21M3 17H21" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                <path d="M3 7H21M3 12H21M3 17H21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
               </svg>
             </button>
             <div className="header-brand">
@@ -153,7 +153,7 @@ export default function App() {
                 id="mode-chat"
               >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                  <path d="M14 10C14 10.35 13.86 10.69 13.61 10.94C13.36 11.19 13.02 11.33 12.67 11.33H5.33L2 14.67V3.33C2 2.98 2.14 2.64 2.39 2.39C2.64 2.14 2.98 2 3.33 2H12.67C13.02 2 13.36 2.14 13.61 2.39C13.86 2.64 14 2.98 14 3.33V10Z" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M14 10C14 10.35 13.86 10.69 13.61 10.94C13.36 11.19 13.02 11.33 12.67 11.33H5.33L2 14.67V3.33C2 2.98 2.14 2.64 2.39 2.39C2.64 2.14 2.98 2 3.33 2H12.67C13.02 2 13.36 2.14 13.61 2.39C13.86 2.64 14 2.98 14 3.33V10Z" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
                 Chat
               </button>
@@ -163,14 +163,26 @@ export default function App() {
                 id="mode-structured"
               >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                  <rect x="2" y="2" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
-                  <rect x="9" y="2" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
-                  <rect x="2" y="9" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
-                  <rect x="9" y="9" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
+                  <rect x="2" y="2" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3" />
+                  <rect x="9" y="2" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3" />
+                  <rect x="2" y="9" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3" />
+                  <rect x="9" y="9" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3" />
                 </svg>
                 Structured
               </button>
             </div>
+            {messages.length > 0 && currentConversationId && (
+              <button
+                className="export-pdf-btn"
+                onClick={() => window.open(`http://localhost:5000/api/conversations/${currentConversationId}/export`, '_blank')}
+                title="Export as PDF Brief"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 15V3M12 15L8 11M12 15L16 11M2 17L2.621 19.485C2.72915 19.9177 2.97882 20.3018 3.33033 20.5763C3.68184 20.8508 4.11501 20.9999 4.561 21H19.439C19.885 20.9999 20.3182 20.8508 20.6697 20.5763C21.0212 20.3018 21.2708 19.9177 21.379 19.485L22 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Export PDF
+              </button>
+            )}
           </div>
         </header>
 
@@ -184,17 +196,25 @@ export default function App() {
               </div>
               <div className="pipeline-queries">
                 {expandedQueries.map((q, i) => (
-                  <span key={i} className="pipeline-query-tag">{q}</span>
+                  <span
+                    key={i}
+                    className="pipeline-query-tag"
+                    style={{ cursor: 'pointer', transition: 'all 0.2s' }}
+                    onClick={() => send(q, false, true)}
+                    title="Run this specific query"
+                  >
+                    {q}
+                  </span>
                 ))}
               </div>
               {retrievalStats && (
                 <div className="pipeline-live-stats">
                   <span className="pipeline-stat">
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 13V7H5V13M6.5 13V3H9.5V13M11 13V9H14V13" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 13V7H5V13M6.5 13V3H9.5V13M11 13V9H14V13" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /></svg>
                     {retrievalStats.openAlex + retrievalStats.pubmed} pubs
                   </span>
                   <span className="pipeline-stat">
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="6" r="4" stroke="currentColor" strokeWidth="1.2"/><path d="M4 14C4 11.79 5.79 10 8 10C10.21 10 12 11.79 12 14" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="6" r="4" stroke="currentColor" strokeWidth="1.2" /><path d="M4 14C4 11.79 5.79 10 8 10C10.21 10 12 11.79 12 14" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" /></svg>
                     {retrievalStats.trials} trials
                   </span>
                   {retrievalStats.fromCache && (
@@ -207,146 +227,151 @@ export default function App() {
         )}
 
         {currentView === 'chat' && (<>
-        {/* Messages */}
-        <div className="messages-container">
-          {messages.length === 0 && !loading && (
-            <div className="welcome-screen">
-              <div className="welcome-hero">
-                <div className="welcome-icon-wrapper">
-                  <div className="welcome-icon-bg" />
-                  <div className="welcome-icon">
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none">
-                      <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" fill="currentColor"/>
-                    </svg>
-                  </div>
-                </div>
-                <h2>{getGreeting()}</h2>
-                <p className="welcome-subtitle">
-                  What medical research would you like to explore today?
-                </p>
-              </div>
-              <div className="quick-actions">
-                {QUICK_ACTIONS.map((action, i) => (
-                  <button
-                    key={i}
-                    className="quick-action"
-                    onClick={() => handleQuickAction(action.text)}
-                    id={`quick-action-${i}`}
-                    style={{ animationDelay: `${i * 60}ms` }}
-                  >
-                    <span className="qa-icon">{action.icon}</span>
-                    <div className="qa-content">
-                      <span className="qa-label">{action.label}</span>
-                      <span className="qa-text">{action.text}</span>
+          {/* Messages */}
+          <div className="messages-container">
+            {messages.length === 0 && !loading && (
+              <div className="welcome-screen">
+                <div className="welcome-hero">
+                  <div className="welcome-icon-wrapper">
+                    <div className="welcome-icon-bg" />
+                    <div className="welcome-icon">
+                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none">
+                        <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" fill="currentColor" />
+                      </svg>
                     </div>
-                    <svg className="qa-arrow" width="14" height="14" viewBox="0 0 16 16" fill="none">
-                      <path d="M6 4L10 8L6 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </div>
+                  <h2>{getGreeting()}</h2>
+                  <p className="welcome-subtitle">
+                    What medical research would you like to explore today?
+                  </p>
+                </div>
+                <div className="quick-actions">
+                  {QUICK_ACTIONS.map((action, i) => (
+                    <button
+                      key={i}
+                      className="quick-action"
+                      onClick={() => handleQuickAction(action.text)}
+                      id={`quick-action-${i}`}
+                      style={{ animationDelay: `${i * 60}ms` }}
+                    >
+                      <span className="qa-icon">{action.icon}</span>
+                      <div className="qa-content">
+                        <span className="qa-label">{action.label}</span>
+                        <span className="qa-text">{action.text}</span>
+                      </div>
+                      <svg className="qa-arrow" width="14" height="14" viewBox="0 0 16 16" fill="none">
+                        <path d="M6 4L10 8L6 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </button>
+                  ))}
+                </div>
+                <div className="welcome-footer">
+                  <span>Powered by</span>
+                  <span className="welcome-badge">PubMed</span>
+                  <span className="welcome-badge">OpenAlex</span>
+                  <span className="welcome-badge">ClinicalTrials.gov</span>
+                  <span className="welcome-badge">Llama 3 70B</span>
+                </div>
+              </div>
+            )}
+
+            {messages.map((msg, i) => (
+              <MessageBubble
+                key={i}
+                message={msg}
+                conversationId={currentConversationId}
+                onFollowUp={(q) => send(q, false)}
+              />
+            ))}
+
+            {/* Follow-up clarification questions */}
+            {followUp && (
+              <FollowUpQuestions
+                followUp={followUp}
+                onAnswer={submitFollowUpAnswer}
+                onGoBack={goBackFollowUp}
+                onSkip={skipFollowUp}
+                disabled={loading}
+              />
+            )}
+
+            {loading && <LoadingState step={loadingStep} stepMessage={stepMessage} />}
+
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Input Area */}
+          <div className="input-area">
+            {inputMode === 'chat' ? (
+              <div className={`input-wrapper ${loading ? 'disabled' : ''}`}>
+                <div className="input-field-wrapper">
+                  <svg className="input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none">
+                    <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
+                    <path d="M16 16L21 21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                  <textarea
+                    ref={textareaRef}
+                    className="chat-input"
+                    placeholder="Ask about any disease, treatment, or clinical trial..."
+                    value={inputValue}
+                    onChange={(e) => setInputValue(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    disabled={loading}
+                    rows={1}
+                    id="chat-input"
+                  />
+                </div>
+                <div className="input-actions">
+                  <span className="input-hint">Enter ↵</span>
+                  <button
+                    className="file-upload-toggle-btn"
+                    onClick={() => setShowFileUpload(true)}
+                    title="Upload Medical Document"
+                    id="file-upload-btn"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                      <path d="M21.44 11.05L12.25 20.24C11.12 21.37 9.58 22 7.97 22C6.36 22 4.82 21.37 3.69 20.24C2.56 19.11 1.93 17.57 1.93 15.96C1.93 14.35 2.56 12.81 3.69 11.68L12.88 2.49C13.64 1.73 14.67 1.3 15.74 1.3C16.82 1.3 17.85 1.73 18.6 2.49C19.36 3.25 19.79 4.28 19.79 5.35C19.79 6.43 19.36 7.46 18.6 8.22L9.41 17.41C9.03 17.79 8.51 18 7.97 18C7.43 18 6.91 17.79 6.53 17.41C6.15 17.03 5.94 16.51 5.94 15.97C5.94 15.43 6.15 14.91 6.53 14.53L15.07 5.99" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                   </button>
-                ))}
+                  <button
+                    className="voice-toggle-btn"
+                    onClick={() => setVoiceMode(true)}
+                    title="Voice Mode"
+                    id="voice-mode-btn"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                      <path d="M12 4V20M8 9V15M4 11V13M16 7V17M20 10V14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </button>
+                  <button
+                    className={`send-btn ${inputValue.trim() ? 'active' : ''}`}
+                    onClick={handleSend}
+                    disabled={loading || !inputValue.trim()}
+                    id="send-btn"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                      <path d="M8 12V4M8 4L4 8M8 4L12 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </button>
+                </div>
               </div>
-              <div className="welcome-footer">
-                <span>Powered by</span>
-                <span className="welcome-badge">PubMed</span>
-                <span className="welcome-badge">OpenAlex</span>
-                <span className="welcome-badge">ClinicalTrials.gov</span>
-                <span className="welcome-badge">Llama 3 70B</span>
-              </div>
-            </div>
-          )}
+            ) : (
+              <StructuredForm onSubmit={handleStructuredSubmit} disabled={loading} />
+            )}
+          </div>
+        </>)}
 
-          {messages.map((msg, i) => (
-            <MessageBubble key={i} message={msg} conversationId={currentConversationId} />
-          ))}
-
-          {/* Follow-up clarification questions */}
-          {followUp && (
-            <FollowUpQuestions
-              followUp={followUp}
-              onAnswer={submitFollowUpAnswer}
-              onGoBack={goBackFollowUp}
-              onSkip={skipFollowUp}
-              disabled={loading}
-            />
-          )}
-
-          {loading && <LoadingState step={loadingStep} stepMessage={stepMessage} />}
-
-          <div ref={messagesEndRef} />
-        </div>
-
-        {/* Input Area */}
-        <div className="input-area">
-          {inputMode === 'chat' ? (
-            <div className={`input-wrapper ${loading ? 'disabled' : ''}`}>
-              <div className="input-field-wrapper">
-                <svg className="input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none">
-                  <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2"/>
-                  <path d="M16 16L21 21" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                </svg>
-                <textarea
-                  ref={textareaRef}
-                  className="chat-input"
-                  placeholder="Ask about any disease, treatment, or clinical trial..."
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  disabled={loading}
-                  rows={1}
-                  id="chat-input"
-                />
-              </div>
-              <div className="input-actions">
-                <span className="input-hint">Enter ↵</span>
-                <button
-                  className="file-upload-toggle-btn"
-                  onClick={() => setShowFileUpload(true)}
-                  title="Upload Medical Document"
-                  id="file-upload-btn"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                    <path d="M21.44 11.05L12.25 20.24C11.12 21.37 9.58 22 7.97 22C6.36 22 4.82 21.37 3.69 20.24C2.56 19.11 1.93 17.57 1.93 15.96C1.93 14.35 2.56 12.81 3.69 11.68L12.88 2.49C13.64 1.73 14.67 1.3 15.74 1.3C16.82 1.3 17.85 1.73 18.6 2.49C19.36 3.25 19.79 4.28 19.79 5.35C19.79 6.43 19.36 7.46 18.6 8.22L9.41 17.41C9.03 17.79 8.51 18 7.97 18C7.43 18 6.91 17.79 6.53 17.41C6.15 17.03 5.94 16.51 5.94 15.97C5.94 15.43 6.15 14.91 6.53 14.53L15.07 5.99" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                </button>
-                <button
-                  className="voice-toggle-btn"
-                  onClick={() => setVoiceMode(true)}
-                  title="Voice Mode"
-                  id="voice-mode-btn"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                    <path d="M12 4V20M8 9V15M4 11V13M16 7V17M20 10V14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                </button>
-                <button
-                  className={`send-btn ${inputValue.trim() ? 'active' : ''}`}
-                  onClick={handleSend}
-                  disabled={loading || !inputValue.trim()}
-                  id="send-btn"
-                >
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                    <path d="M8 12V4M8 4L4 8M8 4L12 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                </button>
-              </div>
-            </div>
-          ) : (
-             <StructuredForm onSubmit={handleStructuredSubmit} disabled={loading} />
-          )}
-        </div>
-      </>)}
-      
-      {currentView === 'profile' && (
-        <ProfilePage user={user} theme={theme} toggleTheme={toggleTheme} onBack={() => setCurrentView('chat')} />
-      )}
+        {currentView === 'profile' && (
+          <ProfilePage user={user} theme={theme} toggleTheme={toggleTheme} onBack={() => setCurrentView('chat')} />
+        )}
       </main>
 
       {/* Right Context Sidebar */}
       {showRightSidebar && currentView === 'chat' && (
-        <ContextSidebar 
-          contextData={contextData} 
-          overview={contextOverview} 
-          stats={contextStats} 
+        <ContextSidebar
+          contextData={contextData}
+          overview={contextOverview}
+          stats={contextStats}
           fullData={activeResponseMsg?.response}
         />
       )}

@@ -334,7 +334,8 @@ Based on the above research data, provide a highly concise, personalized medical
   "researchInsights": "1 short paragraph: strictly the key statistical or treatment findings from the publications. Very brief.",
   "clinicalTrialsSummary": "3-4 concise sentences summarizing the most relevant trials",
   "personalizedRecommendation": "1 brief paragraph tailored specifically to this user's context. End with a 1-sentence medical disclaimer.",
-  "keyFindings": ["Finding 1 [Author, Year]", "Finding 2"]
+  "keyFindings": ["Finding 1 [Author, Year]", "Finding 2"],
+  "suggestedQuestions": ["Follow up question 1?", "Follow up question 2?", "Follow up question 3?"]
 }`;
 
     try {
@@ -359,7 +360,12 @@ Based on the above research data, provide a highly concise, personalized medical
           `• "${t.title}" — Status: ${t.status}, Phase: ${t.phase || 'N/A'}`
         ).join('\n\n') || 'No clinical trials data available.',
         personalizedRecommendation: 'Please consult with a qualified healthcare provider for personalized medical advice based on these research findings.',
-        keyFindings: publications.slice(0, 4).map(p => `${p.title} (${p.year})`)
+        keyFindings: publications.slice(0, 4).map(p => `${p.title} (${p.year})`),
+        suggestedQuestions: [
+          `Are there any active clinical trials for ${userQuery}?`,
+          `What are the most recent treatment breakthroughs?`,
+          `Can you find top researchers studying this?`
+        ]
       };
     }
   }
@@ -440,7 +446,7 @@ Analyze these findings and respond as Dr. Curalink. Provide NEW information you 
 
     try {
       const stream = await this.groq.chat.completions.create({
-        model: MODELS.REASONING,
+        model: MODELS.VOICE || 'llama-3.1-8b-instant',
         messages,
         temperature: 0.6,
         max_tokens: 800,

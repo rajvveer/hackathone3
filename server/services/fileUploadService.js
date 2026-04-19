@@ -1,5 +1,5 @@
 const cloudinary = require('cloudinary').v2;
-const pdfParse = require('pdf-parse');
+const { PDFParse } = require('pdf-parse');
 const Groq = require('groq-sdk');
 const { MODELS } = require('../config/constants');
 
@@ -52,16 +52,25 @@ class FileUploadService {
    * Returns { text, pages, info }
    */
   async extractPdfText(fileBuffer) {
+    let parser = null;
     try {
-      const data = await pdfParse(fileBuffer);
+      parser = new PDFParse({ data: fileBuffer });
+      
+      const textResult = await parser.getText();
+      const infoResult = await parser.getInfo();
+      
       return {
-        text: data.text || '',
-        pages: data.numpages || 0,
-        info: data.info || {},
+        text: textResult.text || '',
+        pages: infoResult.total || 0,
+        info: infoResult.info || {},
       };
     } catch (error) {
       console.error('PDF parse error:', error.message);
       throw new Error(`Failed to parse PDF: ${error.message}`);
+    } finally {
+      if (parser) {
+        await parser.destroy();
+      }
     }
   }
 

@@ -1,4 +1,19 @@
-import React from 'react';
+import React, { useMemo } from 'react';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Tooltip,
+} from 'chart.js';
+import { Bar } from 'react-chartjs-2';
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Tooltip,
+);
 
 export default function ContextSidebar({ contextData, overview, stats, fullData }) {
   if (!contextData) return null;
@@ -12,6 +27,47 @@ export default function ContextSidebar({ contextData, overview, stats, fullData 
   const topResearcher = (fullData && fullData.researchers && fullData.researchers.length > 0) 
     ? fullData.researchers[0] 
     : null;
+
+  const chartInfo = useMemo(() => {
+    let chartData = null;
+    if (fullData && fullData.publications && fullData.publications.length > 0) {
+      const yearCounts = {};
+      fullData.publications.forEach(pub => {
+        if (pub.year && pub.year >= 2010 && pub.year <= new Date().getFullYear()) {
+          yearCounts[pub.year] = (yearCounts[pub.year] || 0) + 1;
+        }
+      });
+      const sortedYears = Object.keys(yearCounts).sort();
+      if (sortedYears.length > 0) {
+        chartData = {
+          labels: sortedYears,
+          datasets: [
+            {
+              label: 'Publications',
+              data: sortedYears.map(y => yearCounts[y]),
+              backgroundColor: 'rgba(52, 211, 153, 0.4)',
+              borderColor: 'rgba(52, 211, 153, 1)',
+              borderWidth: 1,
+              borderRadius: 4,
+            }
+          ]
+        };
+      }
+    }
+    const chartOptions = {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        title: { display: false }
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: 'rgba(255,255,255,0.5)', font: { size: 10 } } },
+        y: { display: false }
+      }
+    };
+    return { data: chartData, options: chartOptions };
+  }, [fullData]);
 
   return (
     <aside className="context-sidebar fade-in-section">
@@ -69,6 +125,17 @@ export default function ContextSidebar({ contextData, overview, stats, fullData 
             <div className="cs-stat-box full-width" style={{ gridColumn: '1 / -1' }}>
               <span className="cs-stat-value">{totalEnrollment.toLocaleString()}</span>
               <span className="cs-stat-label">Target Patient Enrollment</span>
+            </div>
+          </div>
+        )}
+
+        {chartInfo.data && (
+          <div className="cs-section glass-panel" style={{ padding: '16px' }}>
+            <h4 className="cs-section-title" style={{ marginBottom: '16px' }}>
+              <span className="cs-section-icon">📈</span> Research Momentum
+            </h4>
+            <div style={{ height: '120px', width: '100%' }}>
+              <Bar data={chartInfo.data} options={chartInfo.options} />
             </div>
           </div>
         )}

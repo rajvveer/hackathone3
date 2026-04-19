@@ -223,7 +223,7 @@ export default function Sidebar({ conversations, currentConversationId, onSelect
               <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.2" />
               <path d="M8 5V8.5L10 10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
             </svg>
-            <span>Powered by Llama 3 70B</span>
+            <span>Powered by Qwen 32B</span>
           </div>
         </div>
       </aside>

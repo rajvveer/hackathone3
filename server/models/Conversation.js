@@ -22,7 +22,7 @@ const messageSchema = new mongoose.Schema({
     researchInsights: String,
     clinicalTrialsSummary: String,
     personalizedRecommendation: String,
-    keyFindings: [String],
+    keyFindings: [mongoose.Schema.Types.Mixed],
     publications: [{
       title: String,
       authors: [String],
@@ -87,7 +87,7 @@ const messageSchema = new mongoose.Schema({
     type: Date,
     default: Date.now
   }
-});
+}, { strict: false });
 
 const conversationSchema = new mongoose.Schema({
   conversationId: {

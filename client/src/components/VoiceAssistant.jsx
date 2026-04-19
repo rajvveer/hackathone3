@@ -75,7 +75,7 @@ export default function VoiceAssistant({ onClose, onResearchData }) {
       "Querying PubMed vector database...",
       "Extracting patient cohort matching criteria...",
       "Cross-referencing OpenAlex citation network...",
-      "Synthesizing results via Llama 3 70B...",
+      "Synthesizing results via Qwen 32B...",
       "Filtering duplicate medical assertions...",
       "Analyzing semantic similarity of treatments...",
       "Retrieving highest-ranking PI profiles...",

@@ -4,7 +4,7 @@ const STEPS = [
   { icon: '🧠', text: 'Expanding query with AI...', color: '#8B5CF6' },
   { icon: '🔍', text: 'Searching PubMed, OpenAlex & ClinicalTrials.gov...', color: '#3B82F6' },
   { icon: '📊', text: 'Ranking & filtering results...', color: '#F59E0B' },
-  { icon: '🤖', text: 'Generating insights with Llama 3 70B...', color: '#D97757' },
+  { icon: '🤖', text: 'Generating insights with Qwen 32B...', color: '#D97757' },
 ];
 
 /**

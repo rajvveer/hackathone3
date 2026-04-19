@@ -158,8 +158,8 @@ export function useChat() {
    * Send a message — first requests follow-up clarification questions,
    * then after user answers, sends enriched query to the pipeline.
    */
-  const send = useCallback(async (input, isStructured = false) => {
-    if (loading) return;
+  const send = useCallback(async (input, isStructured = false, forceDrop = false) => {
+    if (loading && !forceDrop) return;
 
     // Structured queries skip clarification (already have full context)
     if (isStructured) {

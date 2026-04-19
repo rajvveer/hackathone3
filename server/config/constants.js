@@ -7,10 +7,10 @@ module.exports = {
   CLINICAL_TRIALS_BASE: 'https://clinicaltrials.gov/api/v2/studies',
 
   // Retrieval limits — depth-first strategy (retrieve many, rank to few)
-  OPENALEX_PER_PAGE: 25,
-  OPENALEX_PAGES: 1,             // 25 × 1 = 25 per query
-  PUBMED_RETMAX: 25,             // 25 per query
-  CLINICAL_TRIALS_PAGE_SIZE: 15, // 15 per status × 3 statuses = 45 total
+  OPENALEX_PER_PAGE: 50,
+  OPENALEX_PAGES: 3,             // 50 × 3 = 150 per query
+  PUBMED_RETMAX: 50,             // 50 per query
+  CLINICAL_TRIALS_PAGE_SIZE: 25, // 25 per status × 3 statuses = 75 total
 
   // Cache TTL
   REDIS_TTL: 3600,  // 1 hour (Redis — fast in-memory)
@@ -39,8 +39,9 @@ module.exports = {
   MODELS: {
     QUERY_EXPANSION: 'llama-3.1-8b-instant',   // Fast, for query processing
     RERANKING: 'llama-3.1-8b-instant',
-    REASONING: 'llama-3.3-70b-versatile',       // Powerful, for medical reasoning
+    REASONING: 'qwen/qwen3-32b',               // Using Qwen 32B
     TITLE_GEN: 'llama-3.1-8b-instant',         // Fast, for conversation titles
+    VOICE: 'llama-3.1-8b-instant',             // Dedicated fast model to avoid reasoning tokens in TTS
     VISION: 'llama-3.2-90b-vision-preview',    // Vision model for reading medical docs from images
   },
 

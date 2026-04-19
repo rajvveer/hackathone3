@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Typewriter from './Typewriter';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
@@ -143,7 +143,28 @@ function ClinicalTrialsHeatmap({ trials }) {
         });
         if (res.ok) {
           const data = await res.json();
-          if (mounted) setMarkers(data);
+          if (mounted) {
+            const enrichedMarkers = [];
+            trials.forEach(trial => {
+               const match = data.find(d => d.location === trial.location);
+               if (match && match.lat && match.lng) {
+                  enrichedMarkers.push({ ...trial, lat: match.lat, lng: match.lng });
+               }
+            });
+            
+            const seen = {};
+            const finalMarkers = enrichedMarkers.map(m => {
+               const key = `${Math.round(m.lat*100)},${Math.round(m.lng*100)}`;
+               if (seen[key]) {
+                  seen[key] += 1;
+                  return { ...m, lat: m.lat + (seen[key] * 0.05), lng: m.lng + (seen[key] * 0.05) };
+               } else {
+                  seen[key] = 1;
+                  return m;
+               }
+            });
+            setMarkers(finalMarkers);
+          }
         }
       } catch (err) {
         console.error('Heatmap load error', err);
@@ -154,6 +175,18 @@ function ClinicalTrialsHeatmap({ trials }) {
     fetchCoords();
     return () => { mounted = false; };
   }, [trials]);
+
+/* ── Map Bounds Auto-fitter ────────────────────────────── */
+function MapBounds({ markers }) {
+  const map = useMap();
+  useEffect(() => {
+    if (markers && markers.length > 0) {
+      const bounds = L.latLngBounds(markers.map(m => [m.lat, m.lng]));
+      map.fitBounds(bounds, { padding: [30, 30], maxZoom: 6 });
+    }
+  }, [markers, map]);
+  return null;
+}
 
   if (loading) {
     return <div className="heatmap-loading"><div className="heatmap-pulse"></div> Generating Global Distribution...</div>;
@@ -171,13 +204,31 @@ function ClinicalTrialsHeatmap({ trials }) {
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
         />
-        {markers.filter(loc => loc.lat && loc.lng).map((loc, i) => (
-          <Marker key={i} position={[loc.lat, loc.lng]}>
-            <Popup>
-              {loc.location}
-            </Popup>
-          </Marker>
-        ))}
+        <MapBounds markers={markers} />
+        {markers.map((loc, i) => {
+          const customIcon = L.divIcon({
+            html: `<div style="font-size: 22px; text-shadow: 0 2px 4px rgba(0,0,0,0.4); line-height: 1;">${STATUS_ICON[loc.status] || '📍'}</div>`,
+            className: 'custom-trial-marker',
+            iconSize: [24, 24],
+            iconAnchor: [12, 12]
+          });
+
+          return (
+            <Marker key={i} position={[loc.lat, loc.lng]} icon={customIcon}>
+              <Popup className="trial-custom-popup">
+                <div style={{ padding: '2px', maxWidth: '240px' }}>
+                  <div style={{ fontWeight: 'bold', fontSize: '13px', marginBottom: '6px', lineHeight: 1.3 }}>{loc.title}</div>
+                  <div style={{ fontSize: '11px', color: '#666', marginBottom: '8px', lineHeight: 1.2 }}>{loc.location}</div>
+                  <div style={{ fontSize: '11px', fontWeight: 600 }}>
+                    <span className={`status-pill ${STATUS_CLASS[loc.status] || 'active'}`} style={{ padding: '2px 6px', fontSize: '10px' }}>
+                      {STATUS_ICON[loc.status] || '⚪'} {loc.status?.replace(/_/g, ' ') || 'Unknown'}
+                    </span>
+                  </div>
+                </div>
+              </Popup>
+            </Marker>
+          );
+        })}
       </MapContainer>
     </div>
   );
@@ -495,7 +546,7 @@ function ResearcherCard({ researcher, index }) {
 }
 
 /* ── Metrics Bar ─────────────────────────────────────────── */
-function MetricsBar({ metrics }) {
+function MetricsBar({ metrics, onFollowUp }) {
   if (!metrics) return null;
   const items = [
     { value: metrics.totalRetrieved || 0, label: 'Retrieved', icon: '📥' },
@@ -519,7 +570,15 @@ function MetricsBar({ metrics }) {
           <span className="queries-label">Expanded Queries</span>
           <div className="queries-list">
             {metrics.expandedQueries.map((q, i) => (
-              <span key={i} className="query-chip">{q}</span>
+              <span 
+                key={i} 
+                className="query-chip"
+                style={{ cursor: 'pointer', transition: 'all 0.2s' }}
+                onClick={() => onFollowUp && onFollowUp(q)}
+                title="Search this query"
+              >
+                {q}
+              </span>
             ))}
           </div>
         </div>
@@ -531,7 +590,7 @@ function MetricsBar({ metrics }) {
 /* ══════════════════════════════════════════════════════════ */
 /* ██ MAIN MESSAGE BUBBLE                                  ██ */
 /* ══════════════════════════════════════════════════════════ */
-export default function MessageBubble({ message, conversationId }) {
+export default function MessageBubble({ message, conversationId, onFollowUp }) {
   const [copied, setCopied] = useState(false);
 
   if (message.role === 'user') {
@@ -736,6 +795,55 @@ export default function MessageBubble({ message, conversationId }) {
               </div>
             )}
 
+            {/* ── Publications ──────────────────────────────────── */}
+            {r.publications && r.publications.length > 0 && (
+              <CollapsibleSection
+                title="Top Publications"
+                icon="📚"
+                count={r.publications.length}
+                delay={600}
+              >
+                <div className="cards-list-v2">
+                  {r.publications.map((pub, i) => (
+                    <PublicationCard key={i} pub={pub} index={i} />
+                  ))}
+                </div>
+              </CollapsibleSection>
+            )}
+
+            {/* ── Clinical Trials ───────────────────────────────── */}
+            {r.clinicalTrials && r.clinicalTrials.length > 0 && (
+              <CollapsibleSection
+                title="Clinical Trials"
+                icon="🧪"
+                count={r.clinicalTrials.length}
+                delay={650}
+              >
+                <ClinicalTrialsHeatmap trials={r.clinicalTrials} />
+                <div className="cards-list-v2">
+                  {r.clinicalTrials.map((trial, i) => (
+                    <TrialCard key={i} trial={trial} index={i} conversationId={conversationId} />
+                  ))}
+                </div>
+              </CollapsibleSection>
+            )}
+
+            {/* ── Top Researchers ───────────────────────────────── */}
+            {r.researchers && r.researchers.length > 0 && (
+              <CollapsibleSection
+                title="Top Researchers"
+                icon="👨‍🔬"
+                count={r.researchers.length}
+                delay={700}
+              >
+                <div className="cards-list-v2">
+                  {r.researchers.map((researcher, i) => (
+                    <ResearcherCard key={i} researcher={researcher} index={i} />
+                  ))}
+                </div>
+              </CollapsibleSection>
+            )}
+
             {/* Pipeline Metrics */}
             <MetricsBar metrics={metrics} />
           </div>
@@ -899,8 +1007,23 @@ export default function MessageBubble({ message, conversationId }) {
             </div>
           )}
 
+          {/* ── Suggested Follow-up Chips ─────────────────────── */}
+          {r.suggestedQuestions && r.suggestedQuestions.length > 0 && onFollowUp && (
+            <div className="suggested-chips-container fade-in-section" style={{ animationDelay: '1000ms' }}>
+              {r.suggestedQuestions.map((q, i) => (
+                <button 
+                  key={i} 
+                  className="suggested-chip" 
+                  onClick={() => onFollowUp(q)}
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* ── Pipeline Metrics ──────────────────────────────── */}
-          <MetricsBar metrics={metrics} />
+          <MetricsBar metrics={metrics} onFollowUp={onFollowUp} />
 
         </div>
       </div>

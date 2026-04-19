@@ -4,6 +4,7 @@ const queryExpander = require('../services/queryExpander');
 const retrievalManager = require('../services/retrievalManager');
 const rankingPipeline = require('../services/rankingPipeline');
 const llmService = require('../services/llmService');
+const PDFDocument = require('pdfkit');
 
 // ──────────────────────────────────────────────────────────────
 // Shared helpers
@@ -549,8 +550,26 @@ exports.handleFileUpload = async (req, res) => {
       userQuery || ''
     );
 
+    // Step 3: RAG Retrieval for File Findings
+    console.log('\n🧠 Step 3: RAG Query Expansion for File Analysis...');
+    let ragQuery = userQuery;
+    if (!ragQuery) {
+       ragQuery = analysis.abnormalValues && analysis.abnormalValues.length > 0 
+           ? analysis.abnormalValues.join(', ')
+           : analysis.documentType || 'Medical Report';
+    }
+
+    const context = getContext(conversation);
+    const expansion = await queryExpander.expand(ragQuery, context);
+
+    console.log('\n🔍 Step 4: Retrieving from all sources...');
+    const retrieval = await retrievalManager.retrieve(expansion);
+
+    console.log('\n📊 Step 5: Ranking...');
+    const ranked = rankingPipeline.rank(retrieval.publications, retrieval.clinicalTrials, expansion);
+
     const totalTimeMs = Date.now() - totalStart;
-    console.log(`✅ File analysis complete in ${totalTimeMs}ms`);
+    console.log(`✅ File analysis & RAG complete in ${totalTimeMs}ms`);
 
     // Build response
     const response = {
@@ -558,9 +577,23 @@ exports.handleFileUpload = async (req, res) => {
       fileInfo: processed.fileInfo,
       fileType: processed.type,
       analysis,
+      publications: ranked.publications.map(buildPublicationResponse),
+      clinicalTrials: ranked.clinicalTrials.map(buildTrialResponse),
+      researchers: retrieval.researchers || [],
       pipelineMetrics: {
+        totalRetrieved: (retrieval.metadata.totalBeforeDedup || 0) + (retrieval.metadata.clinicalTrialsCount || 0) || retrieval.metadata.totalResults || 0,
+        totalAfterDedup: (retrieval.metadata.totalAfterDedup || 0) + (retrieval.metadata.clinicalTrialsCount || 0) || retrieval.metadata.totalResults || 0,
+        selectedPublications: ranked.rankingMetrics.selectedPublications,
+        selectedTrials: ranked.rankingMetrics.selectedTrials,
+        queryExpansionTimeMs: expansion.timeMs,
+        retrievalTimeMs: retrieval.timeMs,
+        rankingTimeMs: ranked.rankingMetrics.timeMs,
         totalTimeMs,
-        fileProcessingMs: totalTimeMs, // simplified
+        fileProcessingMs: totalTimeMs,
+        expandedQueries: expansion.expandedQueries,
+        isResearcherQuery: expansion.isResearcherQuery,
+        fromCache: retrieval.fromCache || null,
+        sources: retrieval.metadata.sources
       }
     };
 
@@ -582,7 +615,11 @@ exports.handleFileUpload = async (req, res) => {
         response: {
           ...analysis,
           fileInfo: processed.fileInfo,
+          publications: response.publications,
+          clinicalTrials: response.clinicalTrials,
+          researchers: response.researchers
         },
+        pipelineMetrics: response.pipelineMetrics,
         isFileAnalysis: true,
         timestamp: new Date()
       }
@@ -642,5 +679,158 @@ exports.getHeatmapCoords = async (req, res) => {
   } catch (err) {
     console.error('Heatmap Extractor Error:', err);
     res.status(500).json({ error: 'Failed to extract heatmap coords.' });
+  }
+};
+
+exports.exportPDF = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const conversation = await Conversation.findOne({ conversationId: id });
+    
+    if (!conversation) {
+      return res.status(404).json({ error: 'Conversation not found' });
+    }
+
+    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+    
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=Curalink_Research_Brief_${id}.pdf`);
+    
+    doc.pipe(res);
+
+    // Deep blue top banner
+    doc.rect(0, 0, doc.page.width, 110).fill('#1E3A8A');
+    
+    doc.fillColor('#FFFFFF').fontSize(26).font('Helvetica-Bold').text('Curalink Research Dossier', 50, 35);
+    doc.fillColor('#93C5FD').fontSize(14).font('Helvetica').text(`Topic: ${conversation.title}`, 50, 70);
+
+    let y = 140;
+
+    // Patient Profile Box
+    if (conversation.userProfile && (conversation.userProfile.patientName || conversation.userProfile.diseaseOfInterest)) {
+      doc.roundedRect(50, y, doc.page.width - 100, 75, 8).fill('#F8FAFC');
+      doc.fillColor('#3B82F6').fontSize(14).font('Helvetica-Bold').text('Patient Context & Settings', 70, y + 15);
+      
+      doc.fillColor('#334155').fontSize(11).font('Helvetica');
+      let pY = y + 40;
+      if (conversation.userProfile.patientName) {
+        doc.text(`Patient: ${conversation.userProfile.patientName}`, 70, pY);
+      }
+      if (conversation.userProfile.diseaseOfInterest) {
+        doc.text(`Condition: ${conversation.userProfile.diseaseOfInterest}`, 250, pY);
+      }
+      if (conversation.userProfile.location) {
+        doc.text(`Location: ${conversation.userProfile.location}`, 430, pY);
+      }
+      y += 105;
+    }
+
+    // Messages
+    for (const msg of conversation.messages) {
+      if (doc.y > doc.page.height - 150) {
+        doc.addPage();
+      }
+
+      doc.x = 50; // Reset X margin
+
+      if (msg.role === 'user') {
+        const startY = doc.y;
+        // We draw the text first to correctly compute its height and advance doc.y natively
+        doc.moveDown(0.5);
+        doc.fillColor('#0F172A').fontSize(12).font('Helvetica-Bold');
+        const textH = doc.heightOfString('Q: ' + msg.content, { width: doc.page.width - 140 });
+        
+        // Background for query
+        doc.roundedRect(50, startY, doc.page.width - 100, textH + 20, 8).fill('#F1F5F9');
+        
+        // Actually print the text inside it
+        doc.fillColor('#0F172A').text('Q: ' + msg.content, 70, startY + 10, { width: doc.page.width - 140 });
+        
+        // Reset X and move down natively
+        doc.x = 50;
+        doc.y = startY + textH + 40; 
+      } else if (msg.role === 'assistant') {
+        doc.fillColor('#2563EB').fontSize(16).font('Helvetica-Bold').text('Clinical Intelligence');
+        doc.moveDown(1);
+
+        if (msg.response && msg.response.conditionOverview) {
+          doc.fillColor('#0F172A').fontSize(13).font('Helvetica-Bold').text('Overview');
+          doc.fillColor('#475569').fontSize(11).font('Helvetica').text(msg.response.conditionOverview, { lineGap: 3 });
+          doc.moveDown(1);
+
+          doc.fillColor('#0F172A').fontSize(13).font('Helvetica-Bold').text('Key Research Findings');
+          doc.fillColor('#475569').fontSize(11).font('Helvetica').text(msg.response.researchInsights, { lineGap: 3 });
+          doc.moveDown(1);
+
+          if (msg.response.clinicalTrialsSummary) {
+            doc.fillColor('#0F172A').fontSize(13).font('Helvetica-Bold').text('Clinical Trials Summary');
+            doc.fillColor('#475569').fontSize(11).font('Helvetica').text(msg.response.clinicalTrialsSummary, { lineGap: 3 });
+            doc.moveDown(1);
+          }
+
+          if (msg.response.personalizedRecommendation) {
+             doc.fillColor('#0F172A').fontSize(13).font('Helvetica-Bold').text('Recommendation');
+             doc.fillColor('#475569').fontSize(11).font('Helvetica').text(msg.response.personalizedRecommendation, { lineGap: 3 });
+             doc.moveDown(1);
+          }
+
+          if (msg.response.keyFindings && msg.response.keyFindings.length > 0) {
+            doc.fillColor('#64748B').fontSize(12).font('Helvetica-Bold').text('Primary Citations');
+            doc.fillColor('#64748B').fontSize(9).font('Helvetica-Oblique');
+            msg.response.keyFindings.forEach(kf => {
+               doc.text(`• ${kf}`, { lineGap: 2 });
+            });
+            doc.moveDown(1);
+          }
+
+          // EXTRACTED PUBLICATIONS
+          if (msg.response.publications && msg.response.publications.length > 0) {
+            doc.fillColor('#0F172A').fontSize(13).font('Helvetica-Bold').text('Corroborating Publications');
+            doc.moveDown(0.3);
+            msg.response.publications.slice(0, 5).forEach((pub, i) => {
+              doc.fillColor('#3B82F6').fontSize(10).font('Helvetica-Bold').text(`${i+1}. ${pub.title || 'Untitled Publication'}`);
+              doc.fillColor('#94A3B8').fontSize(9).font('Helvetica').text(`Year: ${pub.year || 'N/A'} | Citations: ${pub.citationCount || '0'} | Relevance: ${(pub.relevanceScore * 100).toFixed(0)}%`);
+              if (pub.url) {
+                doc.fillColor('#60A5FA').fontSize(9).text(pub.url, { link: pub.url, underline: true });
+              }
+              doc.moveDown(0.5);
+            });
+            doc.moveDown(1);
+          }
+
+          // EXTRACTED TRIALS
+          if (msg.response.clinicalTrials && msg.response.clinicalTrials.length > 0) {
+            doc.fillColor('#0F172A').fontSize(13).font('Helvetica-Bold').text('Targeted Clinical Trials');
+            doc.moveDown(0.3);
+            msg.response.clinicalTrials.slice(0, 5).forEach((trial, i) => {
+              doc.fillColor('#10B981').fontSize(10).font('Helvetica-Bold').text(`${i+1}. ${trial.title || 'Untitled Trial'}`);
+              doc.fillColor('#94A3B8').fontSize(9).font('Helvetica').text(`Status: ${trial.status || 'Unknown'} | Phase: ${trial.phase || 'N/A'} | Enrollment: ${trial.enrollmentCount || 'N/A'}`);
+              if (trial.nctId) {
+                const tUrl = `https://clinicaltrials.gov/study/${trial.nctId}`;
+                doc.fillColor('#60A5FA').fontSize(9).text(tUrl, { link: tUrl, underline: true });
+              }
+              doc.moveDown(0.5);
+            });
+            doc.moveDown(1);
+          }
+          
+        } else {
+          doc.fillColor('#475569').fontSize(11).font('Helvetica').text(msg.content, { lineGap: 3 });
+          doc.moveDown(2);
+        }
+      }
+    }
+
+    // Footer at very bottom
+    let pageCount = doc.bufferedPageRange ? doc.bufferedPageRange().count : 1;
+    doc.fillColor('#94A3B8').fontSize(10).font('Helvetica-Oblique').text('Generated globally by Curalink AI Medical Pipeline', 50, doc.page.height - 50, { align: 'center' });
+
+    doc.end();
+
+  } catch (error) {
+    console.error('PDF Export Error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Failed to generate PDF' });
+    }
   }
 };

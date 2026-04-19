@@ -6,6 +6,7 @@ import LoadingState from './components/LoadingState';
 import StructuredForm from './components/StructuredForm';
 import FollowUpQuestions from './components/FollowUpQuestions';
 import VoiceAssistant from './components/VoiceAssistant';
+import FileUpload from './components/FileUpload';
 import './index.css';
 
 const QUICK_ACTIONS = [
@@ -28,7 +29,7 @@ export default function App() {
   const {
     messages, conversations, currentConversationId,
     loading, loadingStep, stepMessage, expandedQueries, retrievalStats,
-    messagesEndRef, send, startNewChat, loadConversation, removeConversation,
+    messagesEndRef, send, uploadFile, startNewChat, loadConversation, removeConversation,
     user, loginUser, logoutUser,
     followUp, submitFollowUpAnswer, goBackFollowUp, skipFollowUp
   } = useChat();
@@ -38,6 +39,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const textareaRef = useRef(null);
   const [voiceMode, setVoiceMode] = useState(false);
+  const [showFileUpload, setShowFileUpload] = useState(false);
 
   // Theme: dark / light
   const [theme, setTheme] = useState(() => {
@@ -285,6 +287,16 @@ export default function App() {
               <div className="input-actions">
                 <span className="input-hint">Enter ↵</span>
                 <button
+                  className="file-upload-toggle-btn"
+                  onClick={() => setShowFileUpload(true)}
+                  title="Upload Medical Document"
+                  id="file-upload-btn"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <path d="M21.44 11.05L12.25 20.24C11.12 21.37 9.58 22 7.97 22C6.36 22 4.82 21.37 3.69 20.24C2.56 19.11 1.93 17.57 1.93 15.96C1.93 14.35 2.56 12.81 3.69 11.68L12.88 2.49C13.64 1.73 14.67 1.3 15.74 1.3C16.82 1.3 17.85 1.73 18.6 2.49C19.36 3.25 19.79 4.28 19.79 5.35C19.79 6.43 19.36 7.46 18.6 8.22L9.41 17.41C9.03 17.79 8.51 18 7.97 18C7.43 18 6.91 17.79 6.53 17.41C6.15 17.03 5.94 16.51 5.94 15.97C5.94 15.43 6.15 14.91 6.53 14.53L15.07 5.99" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </button>
+                <button
                   className="voice-toggle-btn"
                   onClick={() => setVoiceMode(true)}
                   title="Voice Mode"
@@ -319,6 +331,15 @@ export default function App() {
         <VoiceAssistant
           onClose={() => setVoiceMode(false)}
           onResearchData={(data) => console.log('Voice research data:', data)}
+        />
+      )}
+
+      {/* File Upload Modal */}
+      {showFileUpload && (
+        <FileUpload
+          onUpload={(file, query) => uploadFile(file, query)}
+          onClose={() => setShowFileUpload(false)}
+          disabled={loading}
         />
       )}
     </div>

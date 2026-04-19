@@ -375,6 +375,24 @@ export default function MessageBubble({ message }) {
       <div className="message user">
         <div className="message-content">
           {message.content}
+          {message.fileAttachment && (
+            <div className="user-file-attachment">
+              {message.fileAttachment.isImage || message.fileAttachment.url ? (
+                <div className="file-thumb">
+                  {message.fileAttachment.url ? (
+                    <img src={message.fileAttachment.url} alt={message.fileAttachment.name} />
+                  ) : (
+                    <span className="file-thumb-icon">🖼️</span>
+                  )}
+                </div>
+              ) : (
+                <div className="file-thumb">
+                  <span className="file-thumb-icon">📄</span>
+                </div>
+              )}
+              <span className="file-attach-name">{message.fileAttachment.name}</span>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -398,6 +416,169 @@ export default function MessageBubble({ message }) {
 
   const r = message.response;
   const metrics = message.pipelineMetrics;
+
+  // ── File Analysis Response ────────────────────────────────
+  if (r && r.isFileAnalysis) {
+    const statusColors = {
+      normal: '#34d399',
+      elevated: '#fbbf24',
+      low: '#60a5fa',
+      critical: '#ef4444',
+    };
+
+    return (
+      <div className="message assistant">
+        <div className="message-avatar">✦</div>
+        <div className="message-content">
+          <div className="message-bubble">
+            <div className="response-actions-bar">
+              <CopyButton text={[r.summary, r.recommendations, r.abnormalValues?.join('\n')].filter(Boolean).join('\n\n')} />
+            </div>
+
+            {/* Document Type Badge */}
+            {r.documentType && (
+              <div className="file-analysis-header fade-in-section" style={{ animationDelay: '0ms' }}>
+                <div className="doc-type-badge">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <path d="M14 2H6C4.9 2 4 2.9 4 4V20C4 21.1 4.9 22 6 22H18C19.1 22 20 21.1 20 20V8L14 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <polyline points="14,2 14,8 20,8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                  <span>{r.documentType}</span>
+                </div>
+                {r.fileInfo?.url && (
+                  <a href={r.fileInfo.url} target="_blank" rel="noopener noreferrer" className="view-original-link">
+                    View Original ↗
+                  </a>
+                )}
+              </div>
+            )}
+
+            {/* Summary */}
+            {r.summary && (
+              <div className="response-section-v2 fade-in-section" style={{ animationDelay: '50ms' }}>
+                <div className="section-label">
+                  <span className="section-label-icon">📋</span>
+                  Summary
+                </div>
+                <p><Typewriter text={r.summary} disabled={!message.isNew} speed={6} delay={0} /></p>
+              </div>
+            )}
+
+            {/* Key Findings Table */}
+            {r.keyFindings && r.keyFindings.length > 0 && (
+              <div className="response-section-v2 fade-in-section" style={{ animationDelay: '150ms' }}>
+                <div className="section-label">
+                  <span className="section-label-icon">🔬</span>
+                  Key Findings
+                </div>
+                <div className="findings-table-wrapper">
+                  <table className="findings-table">
+                    <thead>
+                      <tr>
+                        <th>Parameter</th>
+                        <th>Value</th>
+                        <th>Reference</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {r.keyFindings.map((f, i) => (
+                        <tr key={i} className={`finding-row ${f.status || ''}`}>
+                          <td className="finding-param">{f.parameter}</td>
+                          <td className="finding-value">{f.value}</td>
+                          <td className="finding-ref">{f.referenceRange || '—'}</td>
+                          <td>
+                            <span
+                              className={`finding-status-badge ${f.status || 'normal'}`}
+                              style={{ color: statusColors[f.status] || statusColors.normal }}
+                            >
+                              {f.status === 'critical' ? '⚠️ ' : ''}{f.status || 'normal'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {/* Explanations */}
+                {r.keyFindings.some(f => f.explanation) && (
+                  <div className="findings-explanations">
+                    {r.keyFindings.filter(f => f.explanation && f.status !== 'normal').map((f, i) => (
+                      <div key={i} className="finding-explanation-item">
+                        <span className="finding-exp-label" style={{ color: statusColors[f.status] || '#94a3b8' }}>
+                          {f.parameter}:
+                        </span>
+                        <span className="finding-exp-text">{f.explanation}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Abnormal Values */}
+            {r.abnormalValues && r.abnormalValues.length > 0 && (
+              <div className="response-section-v2 fade-in-section abnormal-section" style={{ animationDelay: '250ms' }}>
+                <div className="section-label">
+                  <span className="section-label-icon">⚠️</span>
+                  Abnormal Values
+                </div>
+                <ul className="abnormal-list">
+                  {r.abnormalValues.map((v, i) => (
+                    <li key={i}>{v}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Medications */}
+            {r.medications && r.medications.length > 0 && (
+              <div className="response-section-v2 fade-in-section" style={{ animationDelay: '350ms' }}>
+                <div className="section-label">
+                  <span className="section-label-icon">💊</span>
+                  Medications
+                </div>
+                <div className="medications-list">
+                  {r.medications.map((med, i) => (
+                    <span key={i} className="medication-chip">{med}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Recommendations */}
+            {r.recommendations && (
+              <div className="response-section-v2 recommendation-section-v2 fade-in-section" style={{ animationDelay: '450ms' }}>
+                <div className="section-label">
+                  <span className="section-label-icon">🎯</span>
+                  Recommendations
+                </div>
+                <p><Typewriter text={r.recommendations} disabled={!message.isNew} speed={6} delay={500} /></p>
+              </div>
+            )}
+
+            {/* Suggested Research Topics */}
+            {r.suggestedResearchTopics && r.suggestedResearchTopics.length > 0 && (
+              <div className="response-section-v2 fade-in-section" style={{ animationDelay: '550ms' }}>
+                <div className="section-label">
+                  <span className="section-label-icon">🔎</span>
+                  Research These Topics
+                </div>
+                <div className="suggested-topics">
+                  {r.suggestedResearchTopics.map((topic, i) => (
+                    <span key={i} className="suggested-topic-chip">{topic}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Pipeline Metrics */}
+            <MetricsBar metrics={metrics} />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Fallback: plain text (no structured response)
   if (!r) {

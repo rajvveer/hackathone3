@@ -152,3 +152,28 @@ export async function migrateConversations(localIds) {
   if (!res.ok) throw new Error(`Migration failed: ${res.status}`);
   return res.json();
 }
+
+/**
+ * Upload a medical file (PDF or image) for AI analysis
+ */
+export async function uploadMedicalFile(conversationId, file, userQuery = '') {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (conversationId) formData.append('conversationId', conversationId);
+  if (userQuery) formData.append('userQuery', userQuery);
+
+  const token = localStorage.getItem('curalink-token');
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+  const res = await fetch(`${API_BASE}/chat/upload`, {
+    method: 'POST',
+    headers,
+    body: formData
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: `Upload failed: ${res.status}` }));
+    throw new Error(err.error || `Upload failed: ${res.status}`);
+  }
+  return res.json();
+}

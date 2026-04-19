@@ -1,7 +1,22 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
 const chatController = require('../controllers/chatController');
 const { optionalAuth, requireAuth } = require('../middleware/auth');
+
+// Multer config — memory storage, 10MB limit, PDF + images only
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  fileFilter: (req, file, cb) => {
+    const allowed = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (allowed.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only PDF, JPG, PNG, and WEBP are allowed.'), false);
+    }
+  }
+});
 
 // Main chat endpoint (standard JSON)
 router.post('/chat', optionalAuth, chatController.handleChat);
@@ -11,6 +26,9 @@ router.post('/chat/stream', optionalAuth, chatController.handleChatStream);
 
 // Follow-up clarification questions endpoint
 router.post('/chat/clarify', optionalAuth, chatController.handleClarification);
+
+// Medical file upload & AI analysis
+router.post('/chat/upload', optionalAuth, upload.single('file'), chatController.handleFileUpload);
 
 // Conversation management
 router.get('/conversations', optionalAuth, chatController.getConversations);

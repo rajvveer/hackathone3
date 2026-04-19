@@ -32,6 +32,9 @@ export default function VoiceAssistant({ onClose, onResearchData }) {
   const recordStartRef = useRef(0);
   const currentSourceRef = useRef(null);
   const closedRef = useRef(false);
+  const noiseFloorRef = useRef(0);       // Adaptive: measured ambient noise level
+  const noiseSamplesRef = useRef([]);     // Samples collected during calibration
+  const calibratedRef = useRef(false);    // Has noise floor been calibrated?
 
   // These refs always hold the freshest function versions —
   // avoids stale closures in the socket useEffect (which runs only once)
@@ -83,28 +86,14 @@ export default function VoiceAssistant({ onClose, onResearchData }) {
 
   // ── Play audio queue ─────────────────────────────────────
   const playQueue = useCallback(async () => {
-    if (isPlayingRef.current || audioQueueRef.current.length === 0) return;
+    console.log(`▶️ playQueue called | isPlaying: ${isPlayingRef.current} | queue: ${audioQueueRef.current.length} | closed: ${closedRef.current}`);
+    if (isPlayingRef.current) return;
     isPlayingRef.current = true;
-    updateStatusRef.current('speaking');
-
-    if (!playbackCtxRef.current || playbackCtxRef.current.state === 'closed') {
-      playbackCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-    }
-    if (playbackCtxRef.current.state === 'suspended') {
-      playbackCtxRef.current.resume().catch(() => {});
-      // Wait up to 500ms max
-      await Promise.race([
-        new Promise(r => {
-          if (playbackCtxRef.current.state === 'running') return r();
-          const handler = () => { if (playbackCtxRef.current.state === 'running') { playbackCtxRef.current.removeEventListener('statechange', handler); r(); } };
-          playbackCtxRef.current.addEventListener('statechange', handler);
-        }),
-        new Promise(r => setTimeout(r, 500))
-      ]);
-    }
 
     while (audioQueueRef.current.length > 0) {
       if (closedRef.current) break;
+      updateStatusRef.current('speaking'); // ensure ui stays green while processing
+      
       const chunk = audioQueueRef.current.shift();
       try {
         let ab;
@@ -114,34 +103,21 @@ export default function VoiceAssistant({ onClose, onResearchData }) {
           ab = await chunk.arrayBuffer();
         } else if (ArrayBuffer.isView(chunk)) {
           ab = chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength);
+        } else if (chunk && chunk.type === 'Buffer' && Array.isArray(chunk.data)) {
+          // Socket.IO fallback for raw node buffers
+          ab = new Uint8Array(chunk.data).buffer;
         } else {
+          console.warn('Unknown audio chunk format:', chunk);
           continue;
         }
 
-        console.log(`🎵 Decoding chunk: ${ab.byteLength} bytes`);
-
-        // Use Promise.race to ensure decodeAudioData NEVER hangs indefinitely
-        let decoded;
-        try {
-          decoded = await Promise.race([
-            playbackCtxRef.current.decodeAudioData(ab),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('decodeAudioData timeout')), 4000))
-          ]);
-        } catch (decodeErr) {
-          console.error('Audio decode failed or timed out:', decodeErr?.message || decodeErr);
-          continue;
-        }
-
-        if (closedRef.current) break;
-
-        const src = playbackCtxRef.current.createBufferSource();
-        currentSourceRef.current = src;
-        src.buffer = decoded;
-        src.connect(playbackCtxRef.current.destination);
+        console.log(`🎵 Playing audio chunk: ${ab.byteLength} bytes`);
+        const blob = new Blob([ab], { type: 'audio/wav' });
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
         
-        console.log(`▶️ Playing ${decoded.duration.toFixed(2)}s`);
-        
-        // Ensure playback Promise resolves via onended OR a duration-based fallback
+        currentSourceRef.current = audio;
+
         await new Promise(resolve => {
           let hasFinished = false;
           const finish = () => {
@@ -149,13 +125,24 @@ export default function VoiceAssistant({ onClose, onResearchData }) {
             hasFinished = true;
             resolve();
           };
-          src.onended = finish;
-          src.start(0);
-          setTimeout(finish, decoded.duration * 1000 + 500);
+
+          audio.onended = finish;
+          audio.onerror = (e) => {
+            console.error('Audio playback error', e);
+            finish();
+          };
+
+          audio.play().then(() => {
+            // Cap playback to 25 seconds for safety
+            setTimeout(finish, 25000);
+          }).catch((err) => {
+            console.error('Audio play() rejected:', err);
+            finish();
+          });
         });
 
+        URL.revokeObjectURL(url);
         currentSourceRef.current = null;
-        console.log(`⏹️ Chunk done`);
       } catch (e) {
         console.error('Playback loop error:', e?.message || e);
       }
@@ -165,11 +152,11 @@ export default function VoiceAssistant({ onClose, onResearchData }) {
     if (closedRef.current) return;
 
     if (doneRef.current) {
-      setTimeout(() => { if (startListeningRef.current && !closedRef.current) startListeningRef.current(); }, 600);
+      setTimeout(() => { if (startListeningRef.current && !closedRef.current) startListeningRef.current(); }, 500);
     } else {
       updateStatusRef.current('thinking');
     }
-  }, []); // no deps — uses refs only
+  }, []);
 
 
   useEffect(() => { playQueueRef.current = playQueue; }, [playQueue]);
@@ -185,6 +172,10 @@ export default function VoiceAssistant({ onClose, onResearchData }) {
       doneRef.current = false;
       isPlayingRef.current = false;
       silenceStartRef.current = null;
+      // Reset noise calibration for each new recording session
+      noiseFloorRef.current = 0;
+      noiseSamplesRef.current = [];
+      calibratedRef.current = false;
 
       if (micCtxRef.current) { try { micCtxRef.current.close(); } catch (_) {} micCtxRef.current = null; }
 
@@ -231,6 +222,7 @@ export default function VoiceAssistant({ onClose, onResearchData }) {
 
   // ── Socket (runs once, everything via refs) ──────────────
   useEffect(() => {
+    closedRef.current = false; // Fix React 18 StrictMode double-invoke
     const socket = io(SOCKET_URL, { transports: ['websocket'], reconnection: true });
     socketRef.current = socket;
 
@@ -267,6 +259,7 @@ export default function VoiceAssistant({ onClose, onResearchData }) {
         console.log(`🔊 Audio chunk queued: ${buf.byteLength || buf.length} bytes`);
         audioQueueRef.current.push(buf);
         updateStatusRef.current('speaking');
+        console.log(`🔊 playQueueRef exists?`, !!playQueueRef.current);
         if (playQueueRef.current) playQueueRef.current();
       } catch (e) {
         console.error('Failed to process audio chunk:', e.message);
@@ -321,9 +314,11 @@ export default function VoiceAssistant({ onClose, onResearchData }) {
     resize();
     window.addEventListener('resize', resize);
 
-    const SILENCE_THRESHOLD = 18;
-    const SILENCE_MS = 1800;
-    const MIN_RECORD_MS = 2500;
+    const SILENCE_FALLBACK_THRESHOLD = 18; // Fallback if calibration fails
+    const NOISE_CALIBRATION_MS = 600;       // Calibrate ambient noise for first 600ms
+    const SILENCE_MS = 1800;                // 1.8s of silence to auto-stop
+    const MIN_RECORD_MS = 2500;             // Minimum recording duration
+    const MAX_RECORD_MS = 30000;            // Maximum 30s recording to prevent hanging
 
     const loop = () => {
       animRef.current = requestAnimationFrame(loop);
@@ -339,15 +334,48 @@ export default function VoiceAssistant({ onClose, onResearchData }) {
         vol = data.reduce((a, v) => a + v, 0) / data.length;
 
         const elapsed = Date.now() - (recordStartRef.current || Date.now());
-        if (elapsed > MIN_RECORD_MS && vol < SILENCE_THRESHOLD) {
+
+        // ── Adaptive Noise Floor Calibration ──────────────────
+        // During first 600ms, sample the ambient noise level (fan, AC, etc.)
+        if (!calibratedRef.current && elapsed < NOISE_CALIBRATION_MS) {
+          noiseSamplesRef.current.push(vol);
+        } else if (!calibratedRef.current) {
+          // Calibration complete — compute noise floor
+          const samples = noiseSamplesRef.current;
+          if (samples.length > 0) {
+            // Use the median to avoid outliers (e.g., user starts talking immediately)
+            const sorted = [...samples].sort((a, b) => a - b);
+            const median = sorted[Math.floor(sorted.length / 2)];
+            // Threshold = noise floor * 1.6 + 5 (buffer above ambient)
+            noiseFloorRef.current = Math.max(median * 1.6 + 5, SILENCE_FALLBACK_THRESHOLD);
+            console.log(`🎚️ Noise calibrated: floor=${median.toFixed(1)}, threshold=${noiseFloorRef.current.toFixed(1)} (${samples.length} samples)`);
+          } else {
+            noiseFloorRef.current = SILENCE_FALLBACK_THRESHOLD;
+          }
+          calibratedRef.current = true;
+        }
+
+        const silenceThreshold = calibratedRef.current ? noiseFloorRef.current : SILENCE_FALLBACK_THRESHOLD;
+
+        // ── Auto-stop on silence (only after calibration + min recording) ──
+        if (elapsed > Math.max(MIN_RECORD_MS, NOISE_CALIBRATION_MS) && vol < silenceThreshold) {
           if (!silenceStartRef.current) silenceStartRef.current = Date.now();
           else if (Date.now() - silenceStartRef.current > SILENCE_MS) {
             silenceStartRef.current = null;
+            console.log(`🔇 Auto-stop: vol=${vol.toFixed(1)} < threshold=${silenceThreshold.toFixed(1)}`);
             stopMic();
             return;
           }
         } else {
           silenceStartRef.current = null;
+        }
+
+        // ── Hard max recording limit ──────────────────────────
+        if (elapsed > MAX_RECORD_MS) {
+          console.log(`⏱️ Max recording time reached (${MAX_RECORD_MS}ms), auto-stopping`);
+          silenceStartRef.current = null;
+          stopMic();
+          return;
         }
       }
       volumeRef.current += (vol - volumeRef.current) * 0.15;
@@ -406,14 +434,9 @@ export default function VoiceAssistant({ onClose, onResearchData }) {
   // ── Tap sphere ───────────────────────────────────────────
   const handleSphereClick = () => {
     if (status === 'idle') {
+      closedRef.current = false; // Hard reset to ensure we are never blocked
       if (!socketRef.current?.greeted) {
         socketRef.current.greeted = true;
-        // MUST resume/create AudioContext inside a user gesture
-        if (!playbackCtxRef.current || playbackCtxRef.current.state === 'closed') {
-          playbackCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-        } else if (playbackCtxRef.current.state === 'suspended') {
-          playbackCtxRef.current.resume();
-        }
         socketRef.current?.emit('voice:greet');
         updateStatusRef.current('thinking');
       } else {
@@ -444,7 +467,9 @@ export default function VoiceAssistant({ onClose, onResearchData }) {
               : 'Ready'}
           </span>
         </div>
-        <p className="va-caption">{label}</p>
+        {status === 'idle' && (
+          <p className="va-caption">Tap the sphere to begin</p>
+        )}
         {status === 'listening' && (
           <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: '12px', marginTop: '4px' }}>
             Tap sphere to stop early

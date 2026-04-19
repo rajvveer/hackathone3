@@ -383,15 +383,20 @@ HOW TO ANSWER:
 2. Give a clear overview of the topic (2-3 sentences)
 3. Share 2-3 KEY INSIGHTS from the research — describe WHAT was found, not WHO found it. Say things like "Recent studies show that..." or "New research suggests..." NEVER read out author names, journal names, or study titles
 4. If relevant trials exist, mention them generally: "There are active clinical trials exploring this approach"
-5. End with ONE follow-up question: "Would you like more details on the treatments, or should I look into clinical trials for you?"
+5. End with ONE short follow-up question giving the patient choices
 
 CRITICAL VOICE RULES:
 - SHORT clear sentences (under 20 words). End every sentence with a period.
 - NO markdown, NO asterisks, NO bullet points, NO numbered lists, NO special characters
 - NEVER read out author names, paper titles, or institution names — just describe the findings
 - Keep response 120-180 words
-- ALWAYS end with a follow-up question giving the patient choices
-- This is SPOKEN output — it must sound natural when read aloud by TTS`;
+- This is SPOKEN output — it must sound natural when read aloud by TTS
+
+NEVER REPEAT YOURSELF:
+- If you have already discussed something in the conversation history, do NOT say it again
+- For follow-up questions, provide NEW details, different angles, or deeper explanations
+- If the patient asks about something you already covered, go DEEPER — mention specific mechanisms, dosages, trial phases, regional availability, or practical next steps
+- NEVER say "as I mentioned" and then repeat the same content`;
 
     // Provide research context WITHOUT author names to prevent AI from reading them
     const pubContext = publications.slice(0, 5).map((p, i) =>
@@ -402,9 +407,19 @@ CRITICAL VOICE RULES:
       `${i+1}. Trial: ${t.title} — Phase: ${t.phase || 'N/A'}, Status: ${t.status}`
     ).join('\n');
 
-    const historyContext = conversationHistory.length > 0
-      ? `\nPrevious conversation:\n${conversationHistory.map(m => `${m.role}: ${m.content}`).join('\n')}`
-      : '';
+    // Build history context with clear "already said" markers
+    let historyContext = '';
+    if (conversationHistory.length > 0) {
+      const prevAssistantMsgs = conversationHistory
+        .filter(m => m.role === 'assistant')
+        .map(m => m.content);
+      
+      historyContext = `\nConversation so far:\n${conversationHistory.map(m => `${m.role}: ${m.content}`).join('\n')}`;
+      
+      if (prevAssistantMsgs.length > 0) {
+        historyContext += `\n\n⚠️ YOU ALREADY SAID THE FOLLOWING — do NOT repeat any of this:\n${prevAssistantMsgs.join('\n---\n')}`;
+      }
+    }
 
     const prompt = `Patient asked: "${query}"
 ${historyContext}
@@ -416,7 +431,7 @@ ${pubContext || 'None found'}
 Clinical Trials (${clinicalTrials.length} found):
 ${trialContext || 'None found'}
 
-Analyze these findings and respond as Dr. Curalink. Describe the insights in your own words — do NOT read study titles or author names aloud. End with a follow-up question.`;
+Analyze these findings and respond as Dr. Curalink. Provide NEW information you haven't covered yet. Do NOT repeat previous answers. End with a short follow-up question.`;
 
     const messages = [
       { role: 'system', content: systemPrompt },
@@ -441,6 +456,73 @@ Analyze these findings and respond as Dr. Curalink. Describe the insights in you
     } catch (e) {
       console.error('Voice LLM Stream error:', e.message);
       yield " I'm sorry, I encountered a technical issue. Could you please repeat your question? ";
+    }
+  }
+
+  /**
+   * Analyze extracted text from a medical document (PDF or image).
+   * Returns structured analysis with key findings, abnormal values, etc.
+   */
+  async analyzeMedicalDocument(extractedText, userQuery = '') {
+    const systemPrompt = `You are Curalink, an advanced AI Medical Document Analyzer. A user has uploaded a medical document (lab report, prescription, discharge summary, radiology report, etc.) and you need to provide a thorough, structured analysis.
+
+CRITICAL RULES:
+1. ONLY analyze what is actually present in the document text — never hallucinate values
+2. Identify the document type accurately
+3. Highlight ANY abnormal or critical values with clear explanations
+4. Use simple language that patients can understand
+5. Always include a disclaimer to consult healthcare providers
+6. If the document is unclear or partial, acknowledge limitations
+7. Respond in valid JSON format ONLY`;
+
+    const prompt = `EXTRACTED DOCUMENT TEXT:
+---
+${extractedText.substring(0, 4000)}
+---
+
+${userQuery ? `USER'S SPECIFIC QUESTION: "${userQuery}"` : 'No specific question — provide a full analysis.'}
+
+Analyze this medical document and respond ONLY in this exact JSON format:
+{
+  "documentType": "Type of document (e.g., Complete Blood Count Report, Prescription, Discharge Summary, MRI Report, etc.)",
+  "summary": "2-3 sentence plain-language summary of what this document shows",
+  "keyFindings": [
+    {
+      "parameter": "Test/Parameter name",
+      "value": "The value found",
+      "referenceRange": "Normal range if available",
+      "status": "normal | elevated | low | critical",
+      "explanation": "What this means in simple terms"
+    }
+  ],
+  "abnormalValues": ["List of any concerning or out-of-range findings with brief explanation"],
+  "medications": ["List of any medications mentioned with dosages if available"],
+  "recommendations": "Brief personalized recommendation based on the findings. End with a medical disclaimer.",
+  "suggestedResearchTopics": ["2-3 medical topics the user might want to research based on this document"]
+}`;
+
+    try {
+      const result = await this.generate(prompt, {
+        model: MODELS.REASONING,
+        systemPrompt,
+        temperature: 0.15,
+        maxTokens: 2048,
+        jsonMode: true
+      });
+
+      return JSON.parse(result);
+    } catch (e) {
+      console.error('Medical document analysis failed:', e.message);
+      return {
+        documentType: 'Medical Document',
+        summary: `Analysis of uploaded document (${extractedText.length} characters extracted). The AI was unable to produce a structured analysis. Please review the extracted text below.`,
+        keyFindings: [],
+        abnormalValues: [],
+        medications: [],
+        recommendations: 'Please consult with a qualified healthcare provider for a professional interpretation of this document.',
+        suggestedResearchTopics: [],
+        rawExtractedText: extractedText.substring(0, 2000)
+      };
     }
   }
 

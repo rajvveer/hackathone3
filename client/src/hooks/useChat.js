@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { sendMessageStream, requestClarification, getConversations, getConversation, createConversation, deleteConversation, loginWithGoogle, migrateConversations } from '../services/api';
+import { sendMessageStream, requestClarification, getConversations, getConversation, createConversation, deleteConversation, loginWithGoogle, migrateConversations, uploadMedicalFile } from '../services/api';
 import { jwtDecode } from 'jwt-decode';
 
 export function useChat() {
@@ -375,6 +375,70 @@ export function useChat() {
     return enriched;
   }
 
+  /**
+   * Upload a medical file (PDF or image) for AI analysis.
+   */
+  const uploadFile = useCallback(async (file, userQuery = '') => {
+    if (loading) return;
+
+    let convId = currentConversationId;
+    if (!convId) {
+      const data = await createConversation();
+      convId = data.conversationId;
+      if (!user) saveLocalId(convId);
+      setCurrentConversationId(convId);
+    }
+
+    // Add user message immediately
+    const fileName = file.name;
+    const isImage = file.type.startsWith('image/');
+    const userMsg = {
+      role: 'user',
+      content: userQuery
+        ? `📎 Uploaded: ${fileName} — "${userQuery}"`
+        : `📎 Uploaded: ${fileName}`,
+      fileAttachment: { name: fileName, type: file.type, isImage },
+      timestamp: new Date()
+    };
+    setMessages(prev => [...prev, userMsg]);
+    setLoading(true);
+    setLoadingStep(1);
+    setStepMessage('Processing your document...');
+
+    try {
+      const result = await uploadMedicalFile(convId, file, userQuery);
+
+      const analysis = result.analysis || {};
+      const assistantMsg = {
+        role: 'assistant',
+        content: analysis.summary || 'Document analysis complete.',
+        response: {
+          ...analysis,
+          fileInfo: result.fileInfo,
+          isFileAnalysis: true,
+        },
+        pipelineMetrics: result.pipelineMetrics,
+        isNew: true,
+        timestamp: new Date()
+      };
+
+      setMessages(prev => [...prev, assistantMsg]);
+      await loadConversations();
+    } catch (e) {
+      console.error('File upload error:', e);
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: `Failed to analyze file: ${e.message}`,
+        isError: true,
+        timestamp: new Date()
+      }]);
+    } finally {
+      setLoading(false);
+      setLoadingStep(0);
+      setStepMessage('');
+    }
+  }, [loading, currentConversationId, loadConversations, user]);
+
   return {
     messages,
     conversations,
@@ -386,6 +450,7 @@ export function useChat() {
     retrievalStats,
     messagesEndRef,
     send,
+    uploadFile,
     startNewChat,
     loadConversation,
     removeConversation,

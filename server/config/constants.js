@@ -41,6 +41,7 @@ module.exports = {
     RERANKING: 'llama-3.1-8b-instant',
     REASONING: 'llama-3.3-70b-versatile',       // Powerful, for medical reasoning
     TITLE_GEN: 'llama-3.1-8b-instant',         // Fast, for conversation titles
+    VISION: 'llama-3.2-90b-vision-preview',    // Vision model for reading medical docs from images
   },
 
   // High-impact medical journals for credibility scoring

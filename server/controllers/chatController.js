@@ -492,3 +492,100 @@ exports.handleClarification = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+// ──────────────────────────────────────────────────────────────
+// POST /api/chat/upload — Medical File Upload & AI Analysis
+// ──────────────────────────────────────────────────────────────
+const fileUploadService = require('../services/fileUploadService');
+
+exports.handleFileUpload = async (req, res) => {
+  const totalStart = Date.now();
+
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const { conversationId, userQuery } = req.body;
+    const file = req.file;
+
+    console.log(`\n📎 File upload: ${file.originalname} (${file.mimetype}, ${file.size} bytes)`);
+
+    // Load or create conversation
+    const { conversation, convId } = await loadOrCreateConversation(
+      conversationId,
+      userQuery || `Uploaded: ${file.originalname}`,
+      req.user
+    );
+
+    // Step 1: Process file (extract text from PDF or upload image + vision)
+    console.log('📄 Step 1: Processing file...');
+    const processed = await fileUploadService.processFile(
+      file.buffer,
+      file.mimetype,
+      file.originalname
+    );
+
+    console.log(`✅ Extracted ${processed.extractedText.length} chars (${processed.type})`);
+
+    // Step 2: AI Analysis
+    console.log('🤖 Step 2: AI analyzing document...');
+    const analysis = await llmService.analyzeMedicalDocument(
+      processed.extractedText,
+      userQuery || ''
+    );
+
+    const totalTimeMs = Date.now() - totalStart;
+    console.log(`✅ File analysis complete in ${totalTimeMs}ms`);
+
+    // Build response
+    const response = {
+      conversationId: convId,
+      fileInfo: processed.fileInfo,
+      fileType: processed.type,
+      analysis,
+      pipelineMetrics: {
+        totalTimeMs,
+        fileProcessingMs: totalTimeMs, // simplified
+      }
+    };
+
+    // Save to conversation
+    const userContent = userQuery
+      ? `📎 Uploaded: ${file.originalname} — "${userQuery}"`
+      : `📎 Uploaded: ${file.originalname}`;
+
+    conversation.messages.push(
+      {
+        role: 'user',
+        content: userContent,
+        fileAttachment: processed.fileInfo,
+        timestamp: new Date()
+      },
+      {
+        role: 'assistant',
+        content: analysis.summary || 'Document analysis complete.',
+        response: {
+          ...analysis,
+          fileInfo: processed.fileInfo,
+        },
+        isFileAnalysis: true,
+        timestamp: new Date()
+      }
+    );
+
+    // Update title if first exchange
+    if (conversation.messages.length === 2) {
+      conversation.title = `📎 ${analysis.documentType || file.originalname}`;
+    }
+
+    await conversation.save();
+
+    res.json(response);
+
+  } catch (error) {
+    console.error('File upload error:', error);
+    res.status(500).json({ error: error.message || 'Failed to process file' });
+  }
+};
+

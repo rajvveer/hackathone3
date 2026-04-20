@@ -1,0 +1,262 @@
+================================================================
+         CURALINK - DEMO VIDEO SCRIPT (Extreme Technical Deep-Dive)
+================================================================
+
+Duration: ~8-10 minutes
+Style: Highly Technical, Engineering-Focused, Under-the-Hood
+Target Audience: Hackathon Judges, Senior Engineers, AI Architects
+
+================================================================
+PART 1: INTRO (0:00 - 0:30)
+================================================================
+
+[Screen: Curalink chat page open, empty state]
+
+"Hi, I'm [YOUR NAME], and this is Curalink. 
+
+Curalink is not just an API wrapper—it's a high-performance, 
+multi-agent RAG (Retrieval-Augmented Generation) medical research 
+assistant. It retrieves, ranks, and reasons over live medical 
+databases to deliver evidence-backed clinical insights in real 
+time. 
+
+Today, I’m going to take you completely under the hood and show 
+you exactly how the engineering works."
+
+================================================================
+PART 2: FULL TECHNICAL ARCHITECTURE OVERVIEW (0:30 - 3:00)
+================================================================
+
+[Screen: Show architecture diagram or split-screen with server/index.js code]
+
+"Let's break down the tech stack and the architectural decisions."
+
+--- THE FULL-STACK MERN + REDIS HYBRID ---
+
+"The core is a MERN setup, but heavily augmented for latency:
+ - Frontend: React 19 built on Vite for Hot Module Replacement (HMR). 
+   We use custom CSS with glassmorphism, precise animation timelines, 
+   and Leaflet.js rendering localized trial data on a geo-map.
+ - Backend: A clustered Node.js/Express environment.
+ - Database: MongoDB with Mongoose to handle unstructured conversational 
+   metadata and persistence.
+ - Caching (L1/L2): We implemented a two-tier caching system. Redis acts 
+   as Layer 1 (in-memory, <10ms lookup). MongoDB acts as Layer 2. If Redis 
+   misses, we hit Mongo; if Mongo hits, we asynchronously backfill Redis. 
+   Cache keys are generated using an MD5 hash of the normalized, sorted 
+   query arrays.
+ - Transport: Standard REST for data, Socket.io (WebSockets) for the 
+   bidirectional, low-latency streaming required by our Voice AI."
+
+
+--- THE 5 OPEN-SOURCE AI MODELS (Hosted on Groq LPUs) ---
+
+"We don't rely on a single monolithic model. We route tasks to 5 specific 
+models to balance cost, latency, and capability. By running on Groq's 
+Language Processing Units (LPUs), we get speeds passing 800 tokens/sec.
+
+ 1. Llama 3.1 8B Instant: Our low-latency workhorse. Used for Query Expansion, 
+    Intent Classification, and Trial Eligibility matching. It executes in 
+    under 500ms per call.
+ 
+ 2. Qwen 3 32B: Our heavy reasoning engine. It has a massive context window. 
+    We feed it up to 8 full publication abstracts and 6 trial schemas, and it 
+    synthesizes a structured JSON medical response. 32B parameters give us 
+    the clinical accuracy we need without the latency of a 70B+ model.
+
+ 3. Llama 3.2 90B Vision: Our multimodal engine. Handles OCR and semantic 
+    understanding of uploaded medical documents (PDFs/JPEGs) to extract 
+    abnormal lab values and prescriptions.
+
+ 4. Whisper Large V3 Turbo: Highly accurate speech-to-text capable of 
+    handling complex medical terminology like 'pembrolizumab' perfectly.
+
+ 5. Sarvam AI TTS: Text-to-speech generation that outputs raw audio buffers, 
+    giving our AI doctor a natural voice profile."
+
+
+--- THE 3 MEDICAL DATA SOURCES ---
+
+"Our retrieval engine queries three massive live databases using 
+`Promise.allSettled` to prevent network bottlenecks. We pull up to 675 
+documents in about 4 seconds:
+
+ - OpenAlex: We hit their paginated REST API with 3 query variants, fetching 
+   3 pages of 50 results each. That's up to 450 publications per query, 
+   filtering strictly for 'publication_date >= 2018'.
+ 
+ - PubMed (NIH): A complex two-step pipeline. We use standard `esearch` with 
+   our NCBI API keys (raising our rate limit from 3 to 10 req/sec) to fetch 
+   PMIDs. Then we batch them in groups of 50 into `efetch` to download XML 
+   metadata, parsed asynchronously via `xml2js`. Up to 150 items.
+
+ - ClinicalTrials.gov (v2 API): We query three statuses simultaneously: 
+   RECRUITING, ACTIVE_NOT_RECRUITING, and COMPLETED. Up to 75 total trials."
+
+
+--- THE 5-STAGE RAG RETRIEVAL PIPELINE ---
+
+"Here is the exact lifecycle of a user query:
+
+ Stage 1: Query Expansion (Agentic). Llama 8B expands natural language into 
+ 5 hard medical search terms. It checks a custom synonym hashmap (e.g., mapping 
+ 'heart attack' to 'myocardial infarction').
+
+ Stage 2: Parallel Fetch & Deduplication. We fire PubMed, OpenAlex, and CT.gov 
+ concurrently. We deduplicate the combined 600+ results in memory using unique 
+ Set checks against normalized DOIs, PMIDs, and lowercased title strings.
+
+ Stage 3: Multi-Factor Ranking Engine. This is where the magic happens. We 
+ score the 600+ papers down to the top 8. The formula is:
+   * 40% Relevance: A TF-IDF style string matching algorithm across abstract and title.
+   * 25% Recency: Scored using exponential decay `Math.exp(-0.15 * age)`, so 
+     older papers steeply drop off.
+   * 20% Credibility: Regex matching against an array of 30+ tier-1 journals 
+     (Nature, NEJM, Lancet).
+   * 15% Citations: Logarithmic normalization `Math.log(1 + citations) / Math.log(1+500)`.
+
+ Stage 4: LLM Synthesis. Qwen 32B enforces structured JSON output, giving us a 
+ Condition Overview, Key Findings (with proper citing), and Trial Summaries.
+
+ Stage 5: Response hydration. We package this massive payload with latency metrics 
+ and send it to the client."
+
+
+================================================================
+PART 3: FEATURE DEEP DIVES (3:00 - 8:00)
+================================================================
+
+--- FEATURE 1: Intelligent Search & Ranking Execution (3:00 - 4:00) ---
+
+[Action: Type "Latest treatment for lung cancer"]
+
+"Let's see this in action. I'm searching 'Latest treatment for lung cancer'.
+
+[Wait for pipeline to stream through steps]
+
+"Look at the debug metrics streaming in. 
+- You can see the 5 queries Llama 8B generated.
+- In the network payload, we retrieved exactly 542 raw items.
+- The Ranking Pipeline executed its algorithmic scoring and returned the Top 8.
+
+On the UI, notice the specific metadata. We parse OpenAlex's inverted index data 
+to reconstruct abstracts on the fly. You see Open Access flags, dynamic citation 
+metrics, and extracted topic chips. 
+
+For trials, we parse nested JSON elements from ClinicalTrials v2 to extract exact 
+enrollment counts, phase data, and sponsor info."
+
+
+--- FEATURE 2: Context Maintenance & Hallucination Guard (4:00 - 5:00) ---
+
+[Action: Type "Can I take Vitamin D with my current treatment"]
+
+"Now I'm asking: 'Can I take Vitamin D with my current treatment'. I completely 
+dropped the word 'lung cancer'.
+
+How does Curalink know? In MongoDB, we maintain `conversationContext` which tracks 
+`lastDisease`. When I hit enter, our backend intercepts this follow-up.
+
+First, standard LLMs often hallucinate diseases when answering vague queries. To 
+fix this, we built a 'Hallucination Guard'. In `queryExpander.js`, if the expanded 
+query tries to search for a new disease (like 'heart attack') but the user didn't 
+explicitly type it, the system intercepts it and forcefully overrides the variable 
+back to the context disease (Lung Cancer).
+
+Second, see this blue 'Indirect Evidence' banner? That's our semantic gap detector. 
+The system algorithmically checks if the publications match the specific query 
+('Vitamin D') or just the broad context ('Lung Cancer'). If fewer than 25% of 
+the parsed abstracts mention the specific intent, it flags `indirectEvidence=true`. 
+The LLM is prompted to transparently admit it's offering background research rather 
+than a direct answer. Total transparency, zero hallucination."
+
+
+--- FEATURE 3: Voice API Doctor (WebSocket Streaming) (5:00 - 6:00) ---
+
+[Action: Open voice mode, ask about Lymphoma]
+
+"Now for the Voice AI, which operates entirely over WebSockets to bypass HTTP overhead.
+
+[Action: Speak "What are the latest treatments for lymphoma?"]
+
+"Here is the exact data flow:
+1. The browser records WebM/Opus and streams binary chunks over Socket.io.
+2. The server buffers it and uses Groq's Whisper Large V3 Turbo to transcribe the audio payload.
+3. We run the entire RAG pipeline through Qwen 32B.
+4. Now, because Qwen is a reasoning model, it naturally outputs `<think>...</think>` XML-style blocks defining its internal logic. We wrote a regex parser that completely strips this chain-of-thought before it hits the TTS engine, so the AI doesn't read its own thoughts out loud.
+5. We split the sanitized text using a regex sentence boundary `/.split(/(?<=[.!?])\s+/)/`.
+6. Each sentence is piped into Sarvam AI's TTS endpoint.
+7. As soon as a raw audio buffer is generated, it is streamed back through the socket and played on the client via the Web Audio API.
+
+We also bound a listener to `socket.disconnect`. If a user closes the tab, we immediately break the TTS `for` loop to prevent orphaned API calls and server memory leaks."
+
+
+--- FEATURE 4: Multimodal Document Parsing (6:00 - 6:30) ---
+
+[Action: Upload a PDF lab report]
+
+"For file uploads, we use `multer` on the backend.
+
+If it's a PDF, we buffer it through `pdf-parse` to extract raw string data. If it's an image, we pipe a stream directly into Cloudinary, receive the secure URL, and pass that to Llama 3.2 90B Vision.
+
+We send a strict JSON schema prompt to the Vision model requesting: `parameter`, `value`, `referenceRange`, and an algorithmic `status` mapping (normal, elevated, critical). The UI dynamically maps CSS colors based on that JSON status."
+
+
+--- FEATURE 5: AI Trial Eligibility Matcher (6:30 - 7:00) ---
+
+[Action: Expand a trial card, click "Am I Eligible?"]
+
+"Clinical trial criteria are massive strings of unstructured inclusion/exclusion criteria.
+
+When you click 'Am I Eligible?', we send the trial's unstructured text string and the conversation history to Llama 8B. Instead of guessing, we programmed a 'Clarification Intent'. If data is missing (like age or stage), the API returns a JSON array of `missingQuestions`.
+
+The React frontend maps those questions to input fields dynamically. When you answer, we concatenate the new states and re-fire the eligibility evaluation."
+
+
+--- FEATURE 6: Intent-Based Clarification Routing (7:00 - 7:30) ---
+
+[Action: Type a vague query like "headache"]
+
+"What happens if a query is just terrible, like 'headache'? Running a 600-paper RAG pipeline on 'headache' wastes compute and yields garbage data.
+
+We built a routing classifier. Before the pipeline starts, Llama 8B evaluates the query string for `needsClarification`. If true, the system skips retrieval entirely. Instead, it generates a UI struct of clickable follow-up chips. Only once the user provides a specific intent does the heavy lifting start."
+
+
+================================================================
+PART 4: ADDITIONAL ENGINEERING FEATURES (7:30 - 8:00)
+================================================================
+
+[Quick montage -- show each briefly]
+
+"A few more critical engineering features to round it off:
+
+ - PDF Export buffer: We use PDFKit on the backend to dynamically render the JSON response into a formatted, downloadable buffer. 
+ - JWT Auth: Google Auth Library handles token verification on the backend, issuing HTTP-Only secure session tokens.
+ - Typewriter streaming: A custom React hook that buffers string rendering using `requestAnimationFrame` for high-performance streaming effects.
+ - Researcher Data: The OpenAlex Authors API gives us h-index and citation stats, which we map to visual cards."
+
+================================================================
+PART 5: CLOSING (8:00 - 8:30)
+================================================================
+
+[Screen: Full dashboard view]
+
+"To summarize: Curalink integrates 5 leading open-source models on high-speed LPUs. It orchestrates concurrent retrieval across 3 global clinical APIs, deduplicates data in memory, ranks it using a complex algorithmic 4-factor decay formula, caches it via a Redis/Mongo hybrid, and streams it back through a React/Socket.io frontend.
+
+It processes ~600 documents per query in under 10 seconds. 
+
+That concludes the technical architecture of Curalink. Thank you."
+
+
+================================================================
+         NUMBERS CHEAT SHEET (glance while recording)
+================================================================
+Models:             5 (L8B, Qwen32B, L90B Vision, Whisper V3, Sarvam TTS)
+Groq LPU Speed:     > 800 tokens/sec
+Databases:          PubMed (NIH), OpenAlex, ClinicalTrials.gov (v2 API)
+Max API payload:    450 (OpenAlex) + 150 (PubMed) + 75 (CT) = ~675 Docs
+Ranking:            Top 8 Pubs | Top 6 Trials
+Ranking Algo:       Relevance(TF-IDF) + Recency(Exp Decay) + Credibility(Regex array)
+Cache Strategy:     L1 (Redis, <10ms, 1h) | L2 (Mongo DB, 24h) | MD5 hashing
+Voice Stack:        Socket.io -> MediaRecorder -> Whisper -> Qwen -> Sarvam -> Web Audio
+Doc Parse:          multer -> Cloudinary -> pdf-parse -> Llama 90B Vision

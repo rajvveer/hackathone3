@@ -14,7 +14,6 @@ class RankingPipeline {
     const startTime = Date.now();
     const queryTerms = this._extractQueryTerms(expansion);
 
-    // Score and rank publications
     const scoredPubs = publications.map(pub => ({
       ...pub,
       compositeScore: this._scorePublication(pub, queryTerms)
@@ -28,14 +27,66 @@ class RankingPipeline {
     }));
     scoredTrials.sort((a, b) => b.compositeScore - a.compositeScore);
 
-    const topPubs = scoredPubs.slice(0, TOP_PUBLICATIONS);
-    const topTrials = scoredTrials.slice(0, TOP_CLINICAL_TRIALS);
+    // First: Strict relevance filter (Simulation of hybrid semantic matching mechanism)
+    const diseaseLower = (expansion.disease || '').toLowerCase().trim();
+    const intentLower = (expansion.intent || '').toLowerCase().trim();
 
-    console.log(`📊 Ranking: ${publications.length} pubs → top ${topPubs.length} | ${clinicalTrials.length} trials → top ${topTrials.length}`);
+    const hasSemanticOverlap = (pub) => {
+      const text = `${pub.title} ${pub.abstract}`.toLowerCase();
+      // Strict check: explicitly mentions both the disease and the user intent as exact phrases
+      const hasDisease = !diseaseLower || text.includes(diseaseLower);
+      const hasIntent = !intentLower || text.includes(intentLower);
+      return hasDisease && hasIntent;
+    };
+
+    const MIN_SCORE = 0.52;
+    // Apply strict semantic filtering first
+    let strictPubs = scoredPubs.filter(p => p.compositeScore >= MIN_SCORE && hasSemanticOverlap(p));
+    let lowRelevance = false;
+
+    // Fallback strategy: Broaden to related domains if highly relevant results are insufficient
+    let finalPubs = strictPubs;
+    if (strictPubs.length < 6) {
+      // Broaden search constraint - drop strict intent requirement but strictly require the disease domain
+      const broadenedPubs = scoredPubs.filter(p => {
+        if (p.compositeScore < MIN_SCORE) return false;
+        const text = `${p.title} ${p.abstract}`.toLowerCase();
+        return !diseaseLower || text.includes(diseaseLower);
+      });
+      
+      finalPubs = broadenedPubs;
+      lowRelevance = finalPubs.length < 4;
+    } else {
+      lowRelevance = strictPubs.length < 4;
+    }
+    
+    const topPubs = finalPubs.slice(0, TOP_PUBLICATIONS);
+
+    // Apply similar fallback logic to Clinical Trials
+    let strictTrials = scoredTrials.filter(t => t.compositeScore >= MIN_SCORE && hasSemanticOverlap(t));
+    let finalTrials = strictTrials;
+    if (strictTrials.length < 6) {
+      finalTrials = scoredTrials.filter(t => {
+        if (t.compositeScore < MIN_SCORE) return false;
+        const text = `${t.title} ${t.summary}`.toLowerCase();
+        return !diseaseLower || text.includes(diseaseLower);
+      });
+    }
+    const topTrials = finalTrials.slice(0, TOP_CLINICAL_TRIALS);
+
+
+    // Indirect evidence detection: publications match the disease domain
+    // but none directly address the user's specific query intent.
+    // e.g., "Vitamin D + lung cancer" returns general lung cancer papers
+    const indirectEvidence = this._detectIndirectEvidence(topPubs, expansion);
+
+    console.log(`📊 Ranking: ${publications.length} pubs → top ${topPubs.length} | ${clinicalTrials.length} trials → top ${topTrials.length}${indirectEvidence ? ' [INDIRECT EVIDENCE]' : ''}`);
 
     return {
       publications: topPubs,
       clinicalTrials: topTrials,
+      lowRelevance,
+      indirectEvidence,
       rankingMetrics: {
         totalPublications: publications.length,
         totalTrials: clinicalTrials.length,
@@ -46,6 +97,81 @@ class RankingPipeline {
         timeMs: Date.now() - startTime
       }
     };
+  }
+
+  /**
+   * Detect when publications match the disease domain but NOT the specific query intent.
+   * Returns false if direct evidence exists, or a descriptive object if only indirect evidence is available.
+   */
+  _detectIndirectEvidence(publications, expansion) {
+    if (!publications.length || !expansion.intent || !expansion.disease) return false;
+    
+    const intentLower = (expansion.intent || '').toLowerCase().trim();
+    const diseaseLower = (expansion.disease || '').toLowerCase().trim();
+    const originalQuery = (expansion.originalQuery || '').toLowerCase().trim();
+
+    // If the intent IS the disease (e.g., "lung cancer treatment"), no gap to detect
+    if (intentLower === diseaseLower || intentLower.includes(diseaseLower)) return false;
+    
+    // Extract key intent-specific terms (exclude the disease name and common words)
+    const commonWords = new Set(['the', 'for', 'with', 'and', 'can', 'take', 'my', 'current', 'treatment', 'therapy', 'latest', 'recent', 'new', 'best', 'what', 'how', 'does', 'about']);
+    const intentTerms = originalQuery
+      .split(/\s+/)
+      .filter(w => w.length > 2 && !commonWords.has(w) && !diseaseLower.includes(w))
+      .slice(0, 3);
+    
+    if (intentTerms.length === 0) return false;
+
+    // Check how many publications directly mention the intent-specific terms
+    let directMatches = 0;
+    for (const pub of publications) {
+      const text = `${pub.title} ${pub.abstract || ''}`.toLowerCase();
+      const matchesIntent = intentTerms.some(term => text.includes(term));
+      if (matchesIntent) directMatches++;
+    }
+
+    // If fewer than 25% of publications directly mention intent terms → indirect evidence
+    const directRatio = directMatches / publications.length;
+    if (directRatio < 0.25) {
+      // Build a human-readable description of what the user was asking about
+      const querySubject = this._extractQuerySubject(originalQuery, diseaseLower);
+      const diseaseCapitalized = expansion.disease;
+
+      return {
+        isIndirect: true,
+        queryIntent: querySubject,
+        disease: diseaseCapitalized,
+        directMatchCount: directMatches,
+        totalCount: publications.length,
+        message: `No ${diseaseCapitalized}–specific studies on ${querySubject} were found. The following insights are based on related oncology research and treatment context.`
+      };
+    }
+
+    return false;
+  }
+
+  /**
+   * Extract a clean, human-readable subject from the user's query.
+   * e.g., "can i take vitamin d with my current treatment" → "Vitamin D"
+   */
+  _extractQuerySubject(query, diseaseLower) {
+    // Strip common filler words and the disease name
+    const fillers = /\b(can|i|take|with|my|current|the|a|an|is|it|does|do|how|what|about|for|and|or|of|in|on|to|this|that|these|those|should|would|could|will|treatment|therapy|medication|medicine|drug|during|after|before|while|safe|safety|ok|okay)\b/gi;
+    let cleaned = query
+      .replace(new RegExp(diseaseLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '')
+      .replace(fillers, '')
+      .replace(/[?.!,]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!cleaned || cleaned.length < 2) return 'this topic';
+
+    // Capitalize first letter of each word for readability
+    return cleaned
+      .split(' ')
+      .filter(w => w.length > 0)
+      .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(' ');
   }
 
   /**
@@ -137,8 +263,8 @@ class RankingPipeline {
 
     // Medium credibility for known publishers
     if (normalized.includes('springer') || normalized.includes('elsevier') ||
-        normalized.includes('wiley') || normalized.includes('oxford') ||
-        normalized.includes('cambridge') || normalized.includes('taylor')) {
+      normalized.includes('wiley') || normalized.includes('oxford') ||
+      normalized.includes('cambridge') || normalized.includes('taylor')) {
       return 0.6;
     }
 

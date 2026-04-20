@@ -43,7 +43,7 @@ class RetrievalManager {
     if (mongoResult) {
       console.log('💾 MongoDB cache hit — back-filling Redis...');
       if (redis) {
-        redis.setex(redisKey, REDIS_TTL, JSON.stringify(mongoResult)).catch(() => {});
+        redis.setex(redisKey, REDIS_TTL, JSON.stringify(mongoResult)).catch(() => { });
       }
       return { ...mongoResult, fromCache: 'mongodb', timeMs: Date.now() - startTime };
     }

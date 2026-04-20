@@ -4,6 +4,7 @@ const queryExpander = require('../services/queryExpander');
 const retrievalManager = require('../services/retrievalManager');
 const rankingPipeline = require('../services/rankingPipeline');
 const llmService = require('../services/llmService');
+const clinicalTrialsService = require('../services/clinicalTrialsService');
 const PDFDocument = require('pdfkit');
 
 // ──────────────────────────────────────────────────────────────
@@ -61,7 +62,7 @@ async function loadOrCreateConversation(conversationId, userInput, user) {
   if (!conversation) {
     // If structured input was provided, use it. Otherwise seamlessly inject defaults from global medical profile.
     const defaultProfile = dbUser?.medicalProfile || {};
-    
+
     conversation = new Conversation({
       conversationId: convId,
       userId: user ? user._id : undefined,
@@ -172,7 +173,7 @@ exports.handleChat = async (req, res) => {
       if (!classification.requiresResearch) {
         console.log('\n💬 Conversational Intent Detected: bypassed research pipeline.');
         const replyText = classification.response || "Hello! I am Curalink. How can I help you with your health or research questions today?";
-        
+
         conversation.messages.push(
           { role: 'user', content: userInput, timestamp: new Date() },
           { role: 'assistant', content: replyText, timestamp: new Date() }
@@ -200,14 +201,37 @@ exports.handleChat = async (req, res) => {
 
     // 3. Ranking
     console.log('\n📊 Step 3: Ranking...');
-    const ranked = rankingPipeline.rank(retrieval.publications, retrieval.clinicalTrials, expansion);
+    let ranked = rankingPipeline.rank(retrieval.publications, retrieval.clinicalTrials, expansion);
+
+    // Fallback for missing publications
+    if (ranked.publications.length < 4 && expansion.disease && expansion.intent) {
+      console.log('⚠️ <4 publications found, running fallback retrieval with disease name...');
+      const fallbackExpansion = { ...expansion, intent: '', expandedQueries: [expansion.disease] };
+      const fallbackRetrieval = await retrievalManager.retrieve(fallbackExpansion);
+      const fallbackRanked = rankingPipeline.rank(fallbackRetrieval.publications, [], fallbackExpansion);
+      
+      const existingIds = new Set(ranked.publications.map(p => p.id));
+      const addedPubs = fallbackRanked.publications.filter(p => !existingIds.has(p.id));
+      
+      ranked.publications = [...ranked.publications, ...addedPubs].slice(0, 8);
+      ranked.lowRelevance = true;
+      ranked.rankingMetrics.selectedPublications = ranked.publications.length;
+    }
+
+    if (ranked.clinicalTrials.length === 0 && expansion.disease) {
+      console.log('⚠️ 0 trials found, running fallback with disease name...');
+      const fallbackTrials = await clinicalTrialsService.fetchTrials(expansion.disease, '', expansion.location);
+      const fallbackRanked = rankingPipeline.rank([], fallbackTrials, { ...expansion, intent: '' });
+      ranked.clinicalTrials = fallbackRanked.clinicalTrials;
+      ranked.rankingMetrics.selectedTrials = fallbackRanked.rankingMetrics.selectedTrials;
+    }
 
     // 4. LLM Reasoning
     console.log('\n🤖 Step 4: LLM generating response...');
     const llmStart = Date.now();
     const llmResponse = await llmService.generateMedicalResponse(
       typeof userInput === 'string' ? userInput : (userInput.query || userInput.disease),
-      { disease: expansion.disease, intent: expansion.intent, location: expansion.location || '', patientName: expansion.patientName || '', isSymptomQuery: expansion.isSymptomQuery || false },
+      { disease: expansion.disease, intent: expansion.intent, location: expansion.location || '', patientName: expansion.patientName || '', isSymptomQuery: expansion.isSymptomQuery || false, indirectEvidence: ranked.indirectEvidence || false },
       ranked.publications,
       ranked.clinicalTrials,
       conversationHistory,
@@ -221,6 +245,8 @@ exports.handleChat = async (req, res) => {
       ...llmResponse,
       publications: ranked.publications.map(buildPublicationResponse),
       clinicalTrials: ranked.clinicalTrials.map(buildTrialResponse),
+      lowRelevance: ranked.lowRelevance,
+      indirectEvidence: ranked.indirectEvidence || false,
       researchers: retrieval.researchers || [],
       pipelineMetrics: {
         totalRetrieved: (retrieval.metadata.totalBeforeDedup || 0) + (retrieval.metadata.clinicalTrialsCount || 0) || retrieval.metadata.totalResults || 0,
@@ -289,7 +315,7 @@ exports.handleChatStream = async (req, res) => {
       if (!classification.requiresResearch) {
         console.log('\n💬 Conversational Intent Detected: bypassed research pipeline.');
         const replyText = classification.response || "Hello! I am Curalink. How can I help you with your health or research questions today?";
-        
+
         conversation.messages.push(
           { role: 'user', content: userInput, timestamp: new Date() },
           { role: 'assistant', content: replyText, timestamp: new Date() }
@@ -328,7 +354,32 @@ exports.handleChatStream = async (req, res) => {
 
     // Step 3: Ranking
     send('step', { step: 3, message: 'Ranking & filtering results...' });
-    const ranked = rankingPipeline.rank(retrieval.publications, retrieval.clinicalTrials, expansion);
+    let ranked = rankingPipeline.rank(retrieval.publications, retrieval.clinicalTrials, expansion);
+
+    if (ranked.publications.length < 4 && expansion.disease && expansion.intent) {
+      console.log('⚠️ <4 publications found, running fallback retrieval with disease name...');
+      send('step', { step: 3.2, message: 'Running publications fallback...' });
+      const fallbackExpansion = { ...expansion, intent: '', expandedQueries: [expansion.disease] };
+      const fallbackRetrieval = await retrievalManager.retrieve(fallbackExpansion);
+      const fallbackRanked = rankingPipeline.rank(fallbackRetrieval.publications, [], fallbackExpansion);
+      
+      const existingIds = new Set(ranked.publications.map(p => p.id));
+      const addedPubs = fallbackRanked.publications.filter(p => !existingIds.has(p.id));
+      
+      ranked.publications = [...ranked.publications, ...addedPubs].slice(0, 8);
+      ranked.lowRelevance = true;
+      ranked.rankingMetrics.selectedPublications = ranked.publications.length;
+    }
+
+    if (ranked.clinicalTrials.length === 0 && expansion.disease) {
+      console.log('⚠️ 0 trials found, running fallback with disease name...');
+      send('step', { step: 3.5, message: 'Running trials fallback...' });
+      const fallbackTrials = await clinicalTrialsService.fetchTrials(expansion.disease, '', expansion.location);
+      const fallbackRanked = rankingPipeline.rank([], fallbackTrials, { ...expansion, intent: '' });
+      ranked.clinicalTrials = fallbackRanked.clinicalTrials;
+      ranked.rankingMetrics.selectedTrials = fallbackRanked.rankingMetrics.selectedTrials;
+    }
+
     send('ranked', {
       selectedPubs: ranked.rankingMetrics.selectedPublications,
       selectedTrials: ranked.rankingMetrics.selectedTrials
@@ -339,7 +390,7 @@ exports.handleChatStream = async (req, res) => {
     const llmStart = Date.now();
     const llmResponse = await llmService.generateMedicalResponse(
       typeof userInput === 'string' ? userInput : (userInput.query || userInput.disease),
-      { disease: expansion.disease, intent: expansion.intent, location: expansion.location || '', patientName: expansion.patientName || '', isSymptomQuery: expansion.isSymptomQuery || false },
+      { disease: expansion.disease, intent: expansion.intent, location: expansion.location || '', patientName: expansion.patientName || '', isSymptomQuery: expansion.isSymptomQuery || false, indirectEvidence: ranked.indirectEvidence || false },
       ranked.publications,
       ranked.clinicalTrials,
       conversationHistory,
@@ -353,6 +404,8 @@ exports.handleChatStream = async (req, res) => {
       ...llmResponse,
       publications: ranked.publications.map(buildPublicationResponse),
       clinicalTrials: ranked.clinicalTrials.map(buildTrialResponse),
+      lowRelevance: ranked.lowRelevance,
+      indirectEvidence: ranked.indirectEvidence || false,
       researchers: retrieval.researchers || [],
       pipelineMetrics: {
         totalRetrieved: (retrieval.metadata.totalBeforeDedup || 0) + (retrieval.metadata.clinicalTrialsCount || 0) || retrieval.metadata.totalResults || 0,
@@ -447,7 +500,7 @@ exports.deleteConversation = async (req, res) => {
 
     const result = await Conversation.deleteOne(q);
     if (result.deletedCount === 0) {
-       return res.status(404).json({ error: 'Conversation not found or unauthorized' });
+      return res.status(404).json({ error: 'Conversation not found or unauthorized' });
     }
     res.json({ success: true });
   } catch (error) {
@@ -550,26 +603,8 @@ exports.handleFileUpload = async (req, res) => {
       userQuery || ''
     );
 
-    // Step 3: RAG Retrieval for File Findings
-    console.log('\n🧠 Step 3: RAG Query Expansion for File Analysis...');
-    let ragQuery = userQuery;
-    if (!ragQuery) {
-       ragQuery = analysis.abnormalValues && analysis.abnormalValues.length > 0 
-           ? analysis.abnormalValues.join(', ')
-           : analysis.documentType || 'Medical Report';
-    }
-
-    const context = getContext(conversation);
-    const expansion = await queryExpander.expand(ragQuery, context);
-
-    console.log('\n🔍 Step 4: Retrieving from all sources...');
-    const retrieval = await retrievalManager.retrieve(expansion);
-
-    console.log('\n📊 Step 5: Ranking...');
-    const ranked = rankingPipeline.rank(retrieval.publications, retrieval.clinicalTrials, expansion);
-
     const totalTimeMs = Date.now() - totalStart;
-    console.log(`✅ File analysis & RAG complete in ${totalTimeMs}ms`);
+    console.log(`✅ File analysis complete in ${totalTimeMs}ms`);
 
     // Build response
     const response = {
@@ -577,23 +612,9 @@ exports.handleFileUpload = async (req, res) => {
       fileInfo: processed.fileInfo,
       fileType: processed.type,
       analysis,
-      publications: ranked.publications.map(buildPublicationResponse),
-      clinicalTrials: ranked.clinicalTrials.map(buildTrialResponse),
-      researchers: retrieval.researchers || [],
       pipelineMetrics: {
-        totalRetrieved: (retrieval.metadata.totalBeforeDedup || 0) + (retrieval.metadata.clinicalTrialsCount || 0) || retrieval.metadata.totalResults || 0,
-        totalAfterDedup: (retrieval.metadata.totalAfterDedup || 0) + (retrieval.metadata.clinicalTrialsCount || 0) || retrieval.metadata.totalResults || 0,
-        selectedPublications: ranked.rankingMetrics.selectedPublications,
-        selectedTrials: ranked.rankingMetrics.selectedTrials,
-        queryExpansionTimeMs: expansion.timeMs,
-        retrievalTimeMs: retrieval.timeMs,
-        rankingTimeMs: ranked.rankingMetrics.timeMs,
         totalTimeMs,
-        fileProcessingMs: totalTimeMs,
-        expandedQueries: expansion.expandedQueries,
-        isResearcherQuery: expansion.isResearcherQuery,
-        fromCache: retrieval.fromCache || null,
-        sources: retrieval.metadata.sources
+        fileProcessingMs: totalTimeMs, // simplified
       }
     };
 
@@ -615,11 +636,7 @@ exports.handleFileUpload = async (req, res) => {
         response: {
           ...analysis,
           fileInfo: processed.fileInfo,
-          publications: response.publications,
-          clinicalTrials: response.clinicalTrials,
-          researchers: response.researchers
         },
-        pipelineMetrics: response.pipelineMetrics,
         isFileAnalysis: true,
         timestamp: new Date()
       }
@@ -686,21 +703,21 @@ exports.exportPDF = async (req, res) => {
   try {
     const { id } = req.params;
     const conversation = await Conversation.findOne({ conversationId: id });
-    
+
     if (!conversation) {
       return res.status(404).json({ error: 'Conversation not found' });
     }
 
     const doc = new PDFDocument({ margin: 50, size: 'A4' });
-    
+
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename=Curalink_Research_Brief_${id}.pdf`);
-    
+
     doc.pipe(res);
 
     // Deep blue top banner
     doc.rect(0, 0, doc.page.width, 110).fill('#1E3A8A');
-    
+
     doc.fillColor('#FFFFFF').fontSize(26).font('Helvetica-Bold').text('Curalink Research Dossier', 50, 35);
     doc.fillColor('#93C5FD').fontSize(14).font('Helvetica').text(`Topic: ${conversation.title}`, 50, 70);
 
@@ -710,7 +727,7 @@ exports.exportPDF = async (req, res) => {
     if (conversation.userProfile && (conversation.userProfile.patientName || conversation.userProfile.diseaseOfInterest)) {
       doc.roundedRect(50, y, doc.page.width - 100, 75, 8).fill('#F8FAFC');
       doc.fillColor('#3B82F6').fontSize(14).font('Helvetica-Bold').text('Patient Context & Settings', 70, y + 15);
-      
+
       doc.fillColor('#334155').fontSize(11).font('Helvetica');
       let pY = y + 40;
       if (conversation.userProfile.patientName) {
@@ -739,16 +756,16 @@ exports.exportPDF = async (req, res) => {
         doc.moveDown(0.5);
         doc.fillColor('#0F172A').fontSize(12).font('Helvetica-Bold');
         const textH = doc.heightOfString('Q: ' + msg.content, { width: doc.page.width - 140 });
-        
+
         // Background for query
         doc.roundedRect(50, startY, doc.page.width - 100, textH + 20, 8).fill('#F1F5F9');
-        
+
         // Actually print the text inside it
         doc.fillColor('#0F172A').text('Q: ' + msg.content, 70, startY + 10, { width: doc.page.width - 140 });
-        
+
         // Reset X and move down natively
         doc.x = 50;
-        doc.y = startY + textH + 40; 
+        doc.y = startY + textH + 40;
       } else if (msg.role === 'assistant') {
         doc.fillColor('#2563EB').fontSize(16).font('Helvetica-Bold').text('Clinical Intelligence');
         doc.moveDown(1);
@@ -769,16 +786,16 @@ exports.exportPDF = async (req, res) => {
           }
 
           if (msg.response.personalizedRecommendation) {
-             doc.fillColor('#0F172A').fontSize(13).font('Helvetica-Bold').text('Recommendation');
-             doc.fillColor('#475569').fontSize(11).font('Helvetica').text(msg.response.personalizedRecommendation, { lineGap: 3 });
-             doc.moveDown(1);
+            doc.fillColor('#0F172A').fontSize(13).font('Helvetica-Bold').text('Recommendation');
+            doc.fillColor('#475569').fontSize(11).font('Helvetica').text(msg.response.personalizedRecommendation, { lineGap: 3 });
+            doc.moveDown(1);
           }
 
           if (msg.response.keyFindings && msg.response.keyFindings.length > 0) {
             doc.fillColor('#64748B').fontSize(12).font('Helvetica-Bold').text('Primary Citations');
             doc.fillColor('#64748B').fontSize(9).font('Helvetica-Oblique');
             msg.response.keyFindings.forEach(kf => {
-               doc.text(`• ${kf}`, { lineGap: 2 });
+              doc.text(`• ${kf}`, { lineGap: 2 });
             });
             doc.moveDown(1);
           }
@@ -788,7 +805,7 @@ exports.exportPDF = async (req, res) => {
             doc.fillColor('#0F172A').fontSize(13).font('Helvetica-Bold').text('Corroborating Publications');
             doc.moveDown(0.3);
             msg.response.publications.slice(0, 5).forEach((pub, i) => {
-              doc.fillColor('#3B82F6').fontSize(10).font('Helvetica-Bold').text(`${i+1}. ${pub.title || 'Untitled Publication'}`);
+              doc.fillColor('#3B82F6').fontSize(10).font('Helvetica-Bold').text(`${i + 1}. ${pub.title || 'Untitled Publication'}`);
               doc.fillColor('#94A3B8').fontSize(9).font('Helvetica').text(`Year: ${pub.year || 'N/A'} | Citations: ${pub.citationCount || '0'} | Relevance: ${(pub.relevanceScore * 100).toFixed(0)}%`);
               if (pub.url) {
                 doc.fillColor('#60A5FA').fontSize(9).text(pub.url, { link: pub.url, underline: true });
@@ -803,7 +820,7 @@ exports.exportPDF = async (req, res) => {
             doc.fillColor('#0F172A').fontSize(13).font('Helvetica-Bold').text('Targeted Clinical Trials');
             doc.moveDown(0.3);
             msg.response.clinicalTrials.slice(0, 5).forEach((trial, i) => {
-              doc.fillColor('#10B981').fontSize(10).font('Helvetica-Bold').text(`${i+1}. ${trial.title || 'Untitled Trial'}`);
+              doc.fillColor('#10B981').fontSize(10).font('Helvetica-Bold').text(`${i + 1}. ${trial.title || 'Untitled Trial'}`);
               doc.fillColor('#94A3B8').fontSize(9).font('Helvetica').text(`Status: ${trial.status || 'Unknown'} | Phase: ${trial.phase || 'N/A'} | Enrollment: ${trial.enrollmentCount || 'N/A'}`);
               if (trial.nctId) {
                 const tUrl = `https://clinicaltrials.gov/study/${trial.nctId}`;
@@ -813,7 +830,7 @@ exports.exportPDF = async (req, res) => {
             });
             doc.moveDown(1);
           }
-          
+
         } else {
           doc.fillColor('#475569').fontSize(11).font('Helvetica').text(msg.content, { lineGap: 3 });
           doc.moveDown(2);

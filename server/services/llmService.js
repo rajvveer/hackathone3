@@ -126,7 +126,14 @@ RULES:
   - Generate queries specific to that disease
 - Add medical synonyms and related terms
 - Generate 3-5 search query variants
-- If a follow-up question, incorporate previous disease/context
+- CRITICAL FOLLOW-UP RULE: If "Previous Disease" is NOT "none", the user is continuing a conversation about that disease. Words like "my treatment", "my condition", "current treatment", "this cancer" ALL refer to the Previous Disease. You MUST:
+  1. Set "disease" to EXACTLY the Previous Disease value
+  2. Include the Previous Disease name in EVERY expanded query
+  3. NEVER substitute a different disease — if the user says "my treatment", that means the Previous Disease's treatment
+  4. Example: If Previous Disease is "lung cancer" and user asks "Can I take Vitamin D with my current treatment", generate queries like "Vitamin D interaction lung cancer treatment", "Vitamin D supplementation NSCLC", etc.
+- For supplement or interaction queries, always generate terms combining the supplement + disease + treatment type + safety/interaction/dosage intent
+- CRITICAL: Generate ONLY terse medical keyword queries (e.g., "Vitamin D interaction lung cancer"). NEVER include conversational phrasing like "Can I take", "What is", or "How to".
+- CRITICAL: If the user asks about a treatment/supplement but does NOT name a disease, AND "Previous Disease" is "none", you MUST set "disease" to an empty string "". NEVER hallucinate or guess a disease (like "heart attack") if it is not explicitly mentioned or provided in the context.
 - Output ONLY valid JSON, no markdown`;
 
     const prompt = `User Query: "${userQuery}"
@@ -310,13 +317,21 @@ CRITICAL RULES:
 - In keyFindings, include findings about DIFFERENT possible causes`
       : '';
 
+    const indirectGuidance = context.indirectEvidence && context.indirectEvidence.isIndirect
+      ? `\nIMPORTANT — INDIRECT EVIDENCE DETECTED: The research database did not return publications directly addressing the user's specific query ("${userQuery}"). The publications shown are general ${context.disease || 'medical'} research provided as background context. You MUST:
+- In "conditionOverview": Briefly acknowledge that direct research on the user's specific question is limited in current databases, then provide relevant general context about ${context.disease}
+- In "researchInsights": Clearly state that the publications below are general ${context.disease} research, not specific to the user's exact question. Still summarize their key findings as useful background
+- In "personalizedRecommendation": Emphasize that due to limited direct evidence, consulting a healthcare provider is especially important for this specific question
+- Do NOT pretend the publications directly address the user's question — be transparent about the evidence gap`
+      : '';
+
     const prompt = `USER CONTEXT:
 - Patient: ${context.patientName || 'Not specified'}
 - Disease/Symptoms: ${context.disease || 'Not specified'}
 - Query Type: ${isSymptomQuery ? 'SYMPTOM-BASED (provide differential diagnosis with multiple possible causes)' : 'DISEASE-SPECIFIC'}
 - Query: "${userQuery}"
 - Location: ${context.location || 'Not specified'}
-${symptomGuidance}
+${symptomGuidance}${indirectGuidance}
 
 CONVERSATION HISTORY:
 ${historyText || 'First message in conversation'}
@@ -377,40 +392,35 @@ Based on the above research data, provide a highly concise, personalized medical
   async *generateVoiceResponseStream(query, publications = [], clinicalTrials = [], conversationHistory = []) {
     if (!this.groq) throw new Error('Groq client not initialized for streaming');
 
-    const systemPrompt = `You are Dr. Curalink, a highly skilled AI medical research physician in a real-time voice consultation.
+    const systemPrompt = `You are Dr. Curalink, a warm and experienced physician having a face-to-face consultation.
 
-YOUR PERSONALITY:
-- Warm, confident, empathetic — like a senior doctor in a clinic
-- Use simple language anyone can understand
-- Sound natural and human, like a real conversation
+SPEAK LIKE A REAL DOCTOR — not a textbook. Imagine the patient is sitting right in front of you.
 
-HOW TO ANSWER:
-1. Briefly acknowledge their question (1 sentence)
-2. Give a clear overview of the topic (2-3 sentences)
-3. Share 2-3 KEY INSIGHTS from the research — describe WHAT was found, not WHO found it. Say things like "Recent studies show that..." or "New research suggests..." NEVER read out author names, journal names, or study titles
-4. If relevant trials exist, mention them generally: "There are active clinical trials exploring this approach"
-5. End with ONE short follow-up question giving the patient choices
+RESPONSE STRUCTURE (strict):
+1. One warm sentence acknowledging their concern
+2. Your clinical take — 2-3 SHORT sentences covering the most important thing they need to know
+3. One practical next-step or reassurance
+4. End with ONE short question to guide the conversation forward
 
-CRITICAL VOICE RULES:
-- SHORT clear sentences (under 20 words). End every sentence with a period.
-- NO markdown, NO asterisks, NO bullet points, NO numbered lists, NO special characters
-- NEVER read out author names, paper titles, or institution names — just describe the findings
-- Keep response 120-180 words
-- This is SPOKEN output — it must sound natural when read aloud by TTS
+ABSOLUTE RULES:
+- MAXIMUM 80 words total. This is a conversation, not a lecture
+- Every sentence MUST be under 15 words
+- NO author names, NO study titles, NO journal names, NO citations
+- NO markdown, NO asterisks, NO lists, NO numbering, NO special characters
+- Say "recent research shows" or "studies suggest" instead of naming sources
+- Sound warm and human. Use contractions. Say "you" and "your"
+- This is SPOKEN output for TTS — must sound natural when read aloud
+- NEVER use <think> tags or internal reasoning in your output
 
-NEVER REPEAT YOURSELF:
-- If you have already discussed something in the conversation history, do NOT say it again
-- For follow-up questions, provide NEW details, different angles, or deeper explanations
-- If the patient asks about something you already covered, go DEEPER — mention specific mechanisms, dosages, trial phases, regional availability, or practical next steps
-- NEVER say "as I mentioned" and then repeat the same content`;
+DO NOT REPEAT yourself from conversation history.`;
 
     // Provide research context WITHOUT author names to prevent AI from reading them
-    const pubContext = publications.slice(0, 5).map((p, i) =>
-      `${i + 1}. Finding: ${p.title} (${p.year || 'Recent'}) — ${p.abstract?.substring(0, 200) || 'No details'}`
+    const pubContext = publications.slice(0, 4).map((p, i) =>
+      `${i + 1}. ${p.title} (${p.year || 'Recent'}) — ${p.abstract?.substring(0, 150) || 'No details'}`
     ).join('\n');
 
-    const trialContext = clinicalTrials.slice(0, 3).map((t, i) =>
-      `${i + 1}. Trial: ${t.title} — Phase: ${t.phase || 'N/A'}, Status: ${t.status}`
+    const trialContext = clinicalTrials.slice(0, 2).map((t, i) =>
+      `${i + 1}. ${t.title} — Phase: ${t.phase || 'N/A'}, Status: ${t.status}`
     ).join('\n');
 
     // Build history context with clear "already said" markers
@@ -423,21 +433,19 @@ NEVER REPEAT YOURSELF:
       historyContext = `\nConversation so far:\n${conversationHistory.map(m => `${m.role}: ${m.content}`).join('\n')}`;
 
       if (prevAssistantMsgs.length > 0) {
-        historyContext += `\n\n⚠️ YOU ALREADY SAID THE FOLLOWING — do NOT repeat any of this:\n${prevAssistantMsgs.join('\n---\n')}`;
+        historyContext += `\n\nYOU ALREADY SAID THIS — do NOT repeat:\n${prevAssistantMsgs.join('\n---\n')}`;
       }
     }
 
     const prompt = `Patient asked: "${query}"
 ${historyContext}
 
-=== RESEARCH FINDINGS (for your reference only — do NOT read these verbatim) ===
-Key publications (${publications.length} found):
-${pubContext || 'None found'}
+=== RESEARCH (your reference only — do NOT read aloud) ===
+${pubContext || 'No publications found'}
 
-Clinical Trials (${clinicalTrials.length} found):
-${trialContext || 'None found'}
+Trials: ${trialContext || 'None found'}
 
-Analyze these findings and respond as Dr. Curalink. Provide NEW information you haven't covered yet. Do NOT repeat previous answers. End with a short follow-up question.`;
+Respond as Dr. Curalink in 80 words or less. Be brief, warm, and direct.`;
 
     const messages = [
       { role: 'system', content: systemPrompt },
@@ -446,10 +454,10 @@ Analyze these findings and respond as Dr. Curalink. Provide NEW information you 
 
     try {
       const stream = await this.groq.chat.completions.create({
-        model: MODELS.VOICE || 'llama-3.1-8b-instant',
+        model: MODELS.REASONING,
         messages,
-        temperature: 0.6,
-        max_tokens: 800,
+        temperature: 0.4,
+        max_tokens: 350,
         stream: true,
       });
 
@@ -625,11 +633,13 @@ Respond ONLY in strictly valid JSON format matching this exact schema:
       }
     }
 
-    if (uncached.length === 0) return results;
+    // Limit to top 15 locations to avoid huge token prompts
+    const batch = uncached.slice(0, 15);
 
+    // Add max_tokens to prevent Groq from reserving thousands of TPM for the response output buffer
     const prompt = `You are a geographical coordinate extractor. Given a list of location strings (e.g. cities, hospitals), return approximate latitude and longitude coordinates for each. Keep original strings matching perfectly.
 
-Locations: ${JSON.stringify(uncached)}
+Locations: ${JSON.stringify(batch)}
 
 Return ONLY valid JSON matching this schema:
 {
@@ -643,6 +653,7 @@ Return ONLY valid JSON matching this schema:
         messages: [{ role: 'user', content: prompt }],
         model: MODELS.QUERY_EXPANSION,
         temperature: 0,
+        max_tokens: 1024,
         response_format: { type: "json_object" }
       });
       const parsed = JSON.parse(response.choices[0]?.message?.content || '{"coordinates":[]}');

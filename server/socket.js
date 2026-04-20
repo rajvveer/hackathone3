@@ -248,7 +248,13 @@ Respond ONLY in valid JSON:
           fullVoiceText += chunk;
         }
 
-        fullVoiceText = fullVoiceText.trim();
+        // Strip <think>...</think> reasoning blocks (Qwen/DeepSeek models emit these)
+        fullVoiceText = fullVoiceText
+          .replace(/<think>[\s\S]*?<\/think>/gi, '')  // complete think blocks
+          .replace(/<think>[\s\S]*/gi, '')              // unclosed think block at end
+          .replace(/<\/think>/gi, '')                   // stray closing tags
+          .trim();
+
         console.log(`📝 Full voice response (${fullVoiceText.length} chars): "${fullVoiceText.substring(0, 80)}..."`);
 
         // Update conversation history
@@ -266,15 +272,21 @@ Respond ONLY in valid JSON:
           .filter(s => s.trim().length > 2);
 
         for (const sentence of sentences) {
+          // Stop TTS if client disconnected (prevents orphaned API calls)
+          if (!socket.connected) {
+            console.log('⚠️ Client disconnected — aborting TTS loop');
+            break;
+          }
           try {
             const audioBuf = await synthesizeSpeech(sentence.trim());
+            if (!socket.connected) break; // Check again after async TTS call
             socket.emit('voice:audio_chunk', audioBuf);
           } catch (ttsErr) {
             console.error('TTS sentence error:', ttsErr.message);
           }
         }
 
-        socket.emit('voice:done', {});
+        if (socket.connected) socket.emit('voice:done', {});
 
       } catch (error) {
         console.error('Voice pipeline error:', error);

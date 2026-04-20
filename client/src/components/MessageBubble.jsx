@@ -803,6 +803,21 @@ export default function MessageBubble({ message, conversationId, onFollowUp }) {
                 count={r.publications.length}
                 delay={600}
               >
+                {r.lowRelevance && (
+                  <div style={{ backgroundColor: '#fffbeb', color: '#b45309', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px', border: '1px solid #fef3c7' }}>
+                    <span style={{ fontSize: '16px' }}>⚠️</span>
+                    <span>No directly relevant publications found — showing closest available research.</span>
+                  </div>
+                )}
+                {!r.lowRelevance && r.indirectEvidence && r.indirectEvidence.isIndirect && (
+                  <div style={{ background: 'linear-gradient(135deg, #eff6ff, #f0f9ff)', color: '#1e40af', padding: '12px 16px', borderRadius: '10px', fontSize: '13px', marginBottom: '16px', display: 'flex', alignItems: 'flex-start', gap: '10px', border: '1px solid #bfdbfe', lineHeight: '1.5' }}>
+                    <span style={{ fontSize: '18px', flexShrink: 0, marginTop: '1px' }}>🔍</span>
+                    <div>
+                      <strong style={{ display: 'block', marginBottom: '2px', fontSize: '13px' }}>Indirect Evidence</strong>
+                      <span style={{ opacity: 0.85 }}>{r.indirectEvidence.message}</span>
+                    </div>
+                  </div>
+                )}
                 <div className="cards-list-v2">
                   {r.publications.map((pub, i) => (
                     <PublicationCard key={i} pub={pub} index={i} />
@@ -940,6 +955,21 @@ export default function MessageBubble({ message, conversationId, onFollowUp }) {
               count={r.publications.length}
               delay={300}
             >
+              {r.lowRelevance && (
+                <div style={{ backgroundColor: '#fffbeb', color: '#b45309', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px', border: '1px solid #fef3c7' }}>
+                  <span style={{ fontSize: '16px' }}>⚠️</span>
+                  <span>No directly relevant publications found — showing closest available research.</span>
+                </div>
+              )}
+              {!r.lowRelevance && r.indirectEvidence && r.indirectEvidence.isIndirect && (
+                <div style={{ background: 'linear-gradient(135deg, #eff6ff, #f0f9ff)', color: '#1e40af', padding: '12px 16px', borderRadius: '10px', fontSize: '13px', marginBottom: '16px', display: 'flex', alignItems: 'flex-start', gap: '10px', border: '1px solid #bfdbfe', lineHeight: '1.5' }}>
+                  <span style={{ fontSize: '18px', flexShrink: 0, marginTop: '1px' }}>🔍</span>
+                  <div>
+                    <strong style={{ display: 'block', marginBottom: '2px', fontSize: '13px' }}>Indirect Evidence</strong>
+                    <span style={{ opacity: 0.85 }}>{r.indirectEvidence.message}</span>
+                  </div>
+                </div>
+              )}
               <div className="cards-list-v2">
                 {r.publications.map((pub, i) => (
                   <PublicationCard key={i} pub={pub} index={i} />

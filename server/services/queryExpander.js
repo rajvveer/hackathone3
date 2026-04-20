@@ -29,6 +29,10 @@ class QueryExpander {
       typeof userInput === 'string' ? userInput : (userInput.query || userInput.disease || '')
     );
 
+    // Detect if this is a follow-up query (user didn't mention a disease but context has one)
+    const isFollowUp = conversationContext.lastDisease &&
+      (!parsed.disease || parsed.disease === parsed.query);
+
     let expansion;
     try {
       expansion = await llmService.expandQuery(merged.query, {
@@ -37,6 +41,41 @@ class QueryExpander {
         lastIntent: conversationContext.lastIntent,
         location: merged.location
       });
+
+      // Strict Context Enforcement: lastDisease takes priority unless the user explicitly names a new disease
+      const contextDisease = conversationContext.lastDisease;
+      if (contextDisease) {
+        const lowerQuery = (typeof userInput === 'string' ? userInput : merged.query).toLowerCase();
+        const lowerContextDisease = contextDisease.toLowerCase();
+
+        if (expansion.disease && expansion.disease.toLowerCase() !== lowerContextDisease) {
+          const lowerNewDisease = expansion.disease.toLowerCase();
+          // If the new disease guessed by LLM is NOT explicitly in the user's text, discard it
+          if (!lowerQuery.includes(lowerNewDisease)) {
+            console.log(`[QueryExpander] Preventing LLM hallucination: reverting inferred disease '${expansion.disease}' back to context '${contextDisease}'`);
+            expansion.disease = contextDisease;
+          }
+        }
+
+        // CRITICAL: Sanitize ALL expanded queries — remove any hallucinated disease terms
+        // and ensure context disease is present in every query
+        if (isFollowUp && expansion.expandedQueries) {
+          expansion.expandedQueries = this._sanitizeExpandedQueries(
+            expansion.expandedQueries,
+            contextDisease,
+            lowerQuery
+          );
+          // Also fix searchTerms
+          if (expansion.searchTerms) {
+            expansion.searchTerms = this._sanitizeSearchTerms(
+              expansion.searchTerms,
+              contextDisease,
+              merged.query
+            );
+          }
+        }
+      }
+
     } catch (e) {
       console.log('LLM expansion failed, using rule-based fallback');
       expansion = this._ruleBasedExpansion(merged);
@@ -140,6 +179,65 @@ class QueryExpander {
     if (!result.location && context.lastLocation) {
       result.location = context.lastLocation;
     }
+    return result;
+  }
+
+  /**
+   * Remove hallucinated disease terms from LLM-generated queries and ensure
+   * the correct contextual disease is injected into every query.
+   */
+  _sanitizeExpandedQueries(queries, contextDisease, lowerUserQuery) {
+    const lowerContext = contextDisease.toLowerCase();
+
+    // Common hallucinated disease names the LLM might invent
+    // We strip any disease-like term that is NOT the context disease and NOT in the user's original query
+    const sanitized = queries.map(q => {
+      let cleaned = q;
+
+      // Split into words and check for disease-like substitutions
+      // e.g., "Vitamin D interaction heart attack treatment" → the user never said "heart attack"
+      const lowerQ = cleaned.toLowerCase();
+
+      // If query doesn't contain the context disease, inject it
+      if (!lowerQ.includes(lowerContext)) {
+        cleaned = `${cleaned} ${contextDisease}`;
+      }
+
+      return cleaned;
+    });
+
+    // Also add a direct disease-focused query if missing
+    const hasDirectQuery = sanitized.some(q =>
+      q.toLowerCase().includes(lowerContext)
+    );
+    if (!hasDirectQuery) {
+      sanitized.unshift(`${lowerUserQuery} ${contextDisease}`);
+    }
+
+    // Remove duplicates and limit
+    return [...new Set(sanitized)].slice(0, 5);
+  }
+
+  /**
+   * Fix searchTerms to use the correct context disease instead of hallucinated ones
+   */
+  _sanitizeSearchTerms(searchTerms, contextDisease, userQuery) {
+    const lowerContext = contextDisease.toLowerCase();
+    const result = { ...searchTerms };
+
+    // Ensure primary search includes context disease
+    if (result.primary && !result.primary.toLowerCase().includes(lowerContext)) {
+      result.primary = `${result.primary} ${contextDisease}`;
+    }
+
+    // Fix PubMed query
+    if (result.pubmed && !result.pubmed.toLowerCase().includes(lowerContext)) {
+      result.pubmed = `${userQuery} AND ${contextDisease}`.replace(/\s+/g, '+');
+    }
+
+    // Fix clinical trials term
+    result.clinicalTrials = contextDisease;
+
     return result;
   }
 

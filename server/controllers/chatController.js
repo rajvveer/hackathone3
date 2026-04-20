@@ -386,7 +386,7 @@ exports.handleChatStream = async (req, res) => {
     });
 
     // Step 4: LLM Reasoning
-    send('step', { step: 4, message: 'Generating research insights with Llama 3 70B...' });
+    send('step', { step: 4, message: 'Generating research insights with Qwen 32B...' });
     const llmStart = Date.now();
     const llmResponse = await llmService.generateMedicalResponse(
       typeof userInput === 'string' ? userInput : (userInput.query || userInput.disease),

@@ -59,10 +59,25 @@ export default function ContextSidebar({ contextData, overview, stats, fullData 
       maintainAspectRatio: false,
       plugins: {
         legend: { display: false },
-        title: { display: false }
+        title: { display: false },
+        tooltip: {
+          backgroundColor: '#1E293B',
+          titleColor: '#F8FAFC',
+          bodyColor: '#CBD5E1',
+          titleFont: { size: 13, family: 'Inter, sans-serif', weight: 'bold' },
+          bodyFont: { size: 12, family: 'Inter, sans-serif' },
+          padding: 10,
+          cornerRadius: 6,
+          displayColors: false,
+          callbacks: {
+            label: function(context) {
+              return `${context.parsed.y} Publications`;
+            }
+          }
+        }
       },
       scales: {
-        x: { grid: { display: false }, ticks: { color: 'rgba(255,255,255,0.5)', font: { size: 10 } } },
+        x: { grid: { display: false }, ticks: { color: '#94A3B8', font: { size: 10, family: 'Inter' } } },
         y: { display: false }
       }
     };

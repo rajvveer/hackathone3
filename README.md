@@ -155,7 +155,7 @@ Curalink was engineered for absolute performance.
 | **Backend** | Node.js, Express, Socket.IO (WebSockets), Multer, SSE Event Streams |
 | **Databases** | MongoDB Core, Redis In-Memory L1 Cache, Cloudinary Storage |
 | **Generative SDKs** | Groq SDK, Sarvam API, Ollama (Local Fallback Compatibility) |
-| **Inference Models** | Llama 3.3 70B, Llama 3.1 8B, Llama 3.2 90B Vision, Bulbul V3 |
+| **Inference Models** | Qwen 32B, Llama 3.1 8B, Llama 3.2 90B Vision, Bulbul V3 |
 
 </div>
 

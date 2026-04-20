@@ -270,7 +270,7 @@ export default function App() {
                   <span className="welcome-badge">PubMed</span>
                   <span className="welcome-badge">OpenAlex</span>
                   <span className="welcome-badge">ClinicalTrials.gov</span>
-                  <span className="welcome-badge">Llama 3 70B</span>
+                  <span className="welcome-badge">Qwen 32B</span>
                 </div>
               </div>
             )}

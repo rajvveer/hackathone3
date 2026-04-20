@@ -155,70 +155,6 @@ export function useChat() {
   }, []);
 
   /**
-   * Send a message — first requests follow-up clarification questions,
-   * then after user answers, sends enriched query to the pipeline.
-   */
-  const send = useCallback(async (input, isStructured = false, forceDrop = false) => {
-    if (loading && !forceDrop) return;
-
-    // Structured queries skip clarification (already have full context)
-    if (isStructured) {
-      return sendToResearchPipeline(input, true);
-    }
-
-    // Add user message immediately
-    const userMsg = {
-      role: 'user',
-      content: input,
-      timestamp: new Date()
-    };
-    setMessages(prev => [...prev, userMsg]);
-    setLoading(true);
-
-    try {
-      // Request clarification questions from backend
-      const clarifyResult = await requestClarification(input);
-
-      if (clarifyResult.type === 'conversational') {
-        // Conversational (greeting) — show reply directly
-        setMessages(prev => [...prev, {
-          role: 'assistant',
-          content: clarifyResult.content,
-          response: null,
-          pipelineMetrics: null,
-          isNew: true,
-          timestamp: new Date()
-        }]);
-        setLoading(false);
-        return;
-      }
-
-      if (clarifyResult.type === 'clarification' && clarifyResult.questions?.length > 0) {
-        // Show follow-up questions
-        setFollowUp({
-          originalQuery: input,
-          questions: clarifyResult.questions,
-          currentIndex: 0,
-          answers: []
-        });
-        setLoading(false);
-        return;
-      }
-
-      // Fallback: no questions generated, go straight to pipeline
-      setLoading(false);
-      return sendToResearchPipeline(input, false);
-    } catch (e) {
-      console.error('Clarification error:', e);
-      // On error, fall through to normal pipeline
-      setLoading(false);
-      return sendToResearchPipeline(input, false);
-    }
-  }, [loading]);
-
-
-
-  /**
    * Send query to the SSE streaming research pipeline.
    */
   const sendToResearchPipeline = useCallback(async (input, isStructured = false) => {
@@ -323,7 +259,71 @@ export function useChat() {
       setLoadingStep(0);
       setStepMessage('');
     }
-  }, [currentConversationId, loadConversations]);
+  }, [currentConversationId, loadConversations, user]);
+
+
+
+  /**
+   * Send a message — first requests follow-up clarification questions,
+   * then after user answers, sends enriched query to the pipeline.
+   */
+  const send = useCallback(async (input, isStructured = false, forceDrop = false) => {
+    if (loading && !forceDrop) return;
+
+    // Structured queries skip clarification (already have full context)
+    if (isStructured) {
+      return sendToResearchPipeline(input, true);
+    }
+
+    // Add user message immediately
+    const userMsg = {
+      role: 'user',
+      content: input,
+      timestamp: new Date()
+    };
+    setMessages(prev => [...prev, userMsg]);
+    setLoading(true);
+
+    try {
+      // Request clarification questions from backend
+      const clarifyResult = await requestClarification(input);
+
+      if (clarifyResult.type === 'conversational') {
+        // Conversational (greeting) — show reply directly
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: clarifyResult.content,
+          response: null,
+          pipelineMetrics: null,
+          isNew: true,
+          timestamp: new Date()
+        }]);
+        setLoading(false);
+        return;
+      }
+
+      if (clarifyResult.type === 'clarification' && clarifyResult.questions?.length > 0) {
+        // Show follow-up questions
+        setFollowUp({
+          originalQuery: input,
+          questions: clarifyResult.questions,
+          currentIndex: 0,
+          answers: []
+        });
+        setLoading(false);
+        return;
+      }
+
+      // Fallback: no questions generated, go straight to pipeline
+      setLoading(false);
+      return sendToResearchPipeline(input, false);
+    } catch (e) {
+      console.error('Clarification error:', e);
+      // On error, fall through to normal pipeline
+      setLoading(false);
+      return sendToResearchPipeline(input, false);
+    }
+  }, [loading, sendToResearchPipeline]);
 
   /**
    * Submit follow-up answer and advance to next question or trigger research.
@@ -363,7 +363,7 @@ export function useChat() {
     if (originalQuery) {
       sendToResearchPipeline(originalQuery, false);
     }
-  }, [followUp]);
+  }, [followUp, sendToResearchPipeline]);
 
   /**
    * Build an enriched query string from original query + follow-up answers.

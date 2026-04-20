@@ -653,10 +653,12 @@ Return ONLY valid JSON matching this schema:
         messages: [{ role: 'user', content: prompt }],
         model: MODELS.QUERY_EXPANSION,
         temperature: 0,
-        max_tokens: 1024,
+        max_tokens: 500,
         response_format: { type: "json_object" }
       });
-      const parsed = JSON.parse(response.choices[0]?.message?.content || '{"coordinates":[]}');
+      
+      const rawContent = response.choices[0]?.message?.content || '{"coordinates":[]}';
+      const parsed = JSON.parse(rawContent);
       const newCoords = parsed.coordinates || [];
 
       newCoords.forEach(c => {

@@ -174,7 +174,10 @@ export default function App() {
             {messages.length > 0 && currentConversationId && (
               <button
                 className="export-pdf-btn"
-                onClick={() => window.open(`http://localhost:5000/api/conversations/${currentConversationId}/export`, '_blank')}
+                onClick={() => {
+                  const baseUrl = 'https://hellothisismydomain.up.railway.app/api';
+                  window.open(`${baseUrl}/conversations/${currentConversationId}/export`, '_blank');
+                }}
                 title="Export as PDF Brief"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none">

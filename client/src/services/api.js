@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_URL || '/api';
+const API_BASE = 'https://hellothisismydomain.up.railway.app/api';
 
 function getAuthHeaders(extraHeaders = {}) {
   const token = localStorage.getItem('curalink-token');

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { io } from 'socket.io-client';
 
-const SOCKET_URL = 'http://localhost:5000';
+const SOCKET_URL = 'https://hellothisismydomain.up.railway.app';
 const PARTICLE_COUNT = 280;
 const BASE_RADIUS = 100;
 

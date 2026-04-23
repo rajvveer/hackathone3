@@ -4,6 +4,8 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
+const API_BASE = 'https://hellothisismydomain.up.railway.app/api';
+
 // Fix leaflet default icon issues
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -76,7 +78,7 @@ function CollapsibleSection({ title, icon, count, children, defaultOpen = false,
         </div>
         <span className={`collapsible-chevron ${isOpen ? 'open' : ''}`}>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <path d="M4 6L8 10L12 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M4 6L8 10L12 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </span>
       </button>
@@ -108,9 +110,9 @@ function CopyButton({ text }) {
   return (
     <button className="copy-btn" onClick={handleCopy} title="Copy to clipboard">
       {copied ? (
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 8.5L6.5 11L12 5" stroke="#34d399" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 8.5L6.5 11L12 5" stroke="#34d399" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
       ) : (
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.3"/><path d="M3 11V3.5A1.5 1.5 0 014.5 2H11" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.3" /><path d="M3 11V3.5A1.5 1.5 0 014.5 2H11" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" /></svg>
       )}
     </button>
   );
@@ -127,16 +129,16 @@ function ClinicalTrialsHeatmap({ trials }) {
       const locations = trials
         .map(t => t.location)
         .filter(loc => loc && loc.length > 3 && loc !== 'Location not specified');
-      
+
       const uniqueLocs = [...new Set(locations)].slice(0, 15); // max 15 to keep it fast
 
       if (uniqueLocs.length === 0) {
-        if(mounted) setLoading(false);
+        if (mounted) setLoading(false);
         return;
       }
 
       try {
-        const res = await fetch('/api/chat/heatmap-coords', {
+        const res = await fetch(`${API_BASE}/chat/heatmap-coords`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ locations: uniqueLocs })
@@ -146,22 +148,22 @@ function ClinicalTrialsHeatmap({ trials }) {
           if (mounted) {
             const enrichedMarkers = [];
             trials.forEach(trial => {
-               const match = data.find(d => d.location === trial.location);
-               if (match && match.lat && match.lng) {
-                  enrichedMarkers.push({ ...trial, lat: match.lat, lng: match.lng });
-               }
+              const match = data.find(d => d.location === trial.location);
+              if (match && match.lat && match.lng) {
+                enrichedMarkers.push({ ...trial, lat: match.lat, lng: match.lng });
+              }
             });
-            
+
             const seen = {};
             const finalMarkers = enrichedMarkers.map(m => {
-               const key = `${Math.round(m.lat*100)},${Math.round(m.lng*100)}`;
-               if (seen[key]) {
-                  seen[key] += 1;
-                  return { ...m, lat: m.lat + (seen[key] * 0.05), lng: m.lng + (seen[key] * 0.05) };
-               } else {
-                  seen[key] = 1;
-                  return m;
-               }
+              const key = `${Math.round(m.lat * 100)},${Math.round(m.lng * 100)}`;
+              if (seen[key]) {
+                seen[key] += 1;
+                return { ...m, lat: m.lat + (seen[key] * 0.05), lng: m.lng + (seen[key] * 0.05) };
+              } else {
+                seen[key] = 1;
+                return m;
+              }
             });
             setMarkers(finalMarkers);
           }
@@ -169,24 +171,24 @@ function ClinicalTrialsHeatmap({ trials }) {
       } catch (err) {
         console.error('Heatmap load error', err);
       } finally {
-        if(mounted) setLoading(false);
+        if (mounted) setLoading(false);
       }
     };
     fetchCoords();
     return () => { mounted = false; };
   }, [trials]);
 
-/* ── Map Bounds Auto-fitter ────────────────────────────── */
-function MapBounds({ markers }) {
-  const map = useMap();
-  useEffect(() => {
-    if (markers && markers.length > 0) {
-      const bounds = L.latLngBounds(markers.map(m => [m.lat, m.lng]));
-      map.fitBounds(bounds, { padding: [30, 30], maxZoom: 6 });
-    }
-  }, [markers, map]);
-  return null;
-}
+  /* ── Map Bounds Auto-fitter ────────────────────────────── */
+  function MapBounds({ markers }) {
+    const map = useMap();
+    useEffect(() => {
+      if (markers && markers.length > 0) {
+        const bounds = L.latLngBounds(markers.map(m => [m.lat, m.lng]));
+        map.fitBounds(bounds, { padding: [30, 30], maxZoom: 6 });
+      }
+    }, [markers, map]);
+    return null;
+  }
 
   if (loading) {
     return <div className="heatmap-loading"><div className="heatmap-pulse"></div> Generating Global Distribution...</div>;
@@ -252,7 +254,7 @@ function PublicationCard({ pub, index }) {
             {pub.isOpenAccess && <span className="meta-chip oa">🔓 Open Access</span>}
             {pub.citationCount > 0 && (
               <span className="meta-chip citations">
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 12V7M8 12V4M13 12V1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 12V7M8 12V4M13 12V1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
                 {pub.citationCount.toLocaleString()}
               </span>
             )}
@@ -306,7 +308,7 @@ function TrialCard({ trial, index, conversationId }) {
   const checkEligibility = async (additionalContext = '') => {
     setMatchState('loading');
     try {
-      const res = await fetch('/api/chat/trial-match', {
+      const res = await fetch(`${API_BASE}/chat/trial-match`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ criteria: trial.eligibility, conversationId, additionalContext })
@@ -430,7 +432,7 @@ function TrialCard({ trial, index, conversationId }) {
                     </span>
                   </div>
                   <p className="match-result-reasoning">{matchState.reasoning}</p>
-                  
+
                   {matchState.missingQuestions && matchState.missingQuestions.length > 0 && (
                     <div className="match-followup-section fade-in-section">
                       <div className="match-followup-header">
@@ -441,8 +443,8 @@ function TrialCard({ trial, index, conversationId }) {
                         {matchState.missingQuestions.map((q, i) => (
                           <div key={i} className="followup-qa-pair">
                             <label className="followup-question-label">{q}</label>
-                            <input 
-                              type="text" 
+                            <input
+                              type="text"
                               className="followup-specific-input"
                               placeholder="Your answer..."
                               value={followUpAnswer[i] || ''}
@@ -458,7 +460,7 @@ function TrialCard({ trial, index, conversationId }) {
                         ))}
                       </div>
                       <div className="match-followup-actions">
-                        <button 
+                        <button
                           className={`followup-submit-btn ${Object.keys(followUpAnswer).length > 0 ? 'active' : ''}`}
                           onClick={() => {
                             const combinedAnswers = matchState.missingQuestions
@@ -570,8 +572,8 @@ function MetricsBar({ metrics, onFollowUp }) {
           <span className="queries-label">Expanded Queries</span>
           <div className="queries-list">
             {metrics.expandedQueries.map((q, i) => (
-              <span 
-                key={i} 
+              <span
+                key={i}
                 className="query-chip"
                 style={{ cursor: 'pointer', transition: 'all 0.2s' }}
                 onClick={() => onFollowUp && onFollowUp(q)}
@@ -628,7 +630,7 @@ export default function MessageBubble({ message, conversationId, onFollowUp }) {
         <div className="message-content">
           <div className="message-bubble">
             <div className="error-banner">
-              <svg width="18" height="18" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="#ef4444" strokeWidth="1.5"/><path d="M8 4.5V8.5M8 10.5V11" stroke="#ef4444" strokeWidth="1.5" strokeLinecap="round"/></svg>
+              <svg width="18" height="18" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="#ef4444" strokeWidth="1.5" /><path d="M8 4.5V8.5M8 10.5V11" stroke="#ef4444" strokeWidth="1.5" strokeLinecap="round" /></svg>
               <span>{message.content}</span>
             </div>
           </div>
@@ -663,8 +665,8 @@ export default function MessageBubble({ message, conversationId, onFollowUp }) {
               <div className="file-analysis-header fade-in-section" style={{ animationDelay: '0ms' }}>
                 <div className="doc-type-badge">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                    <path d="M14 2H6C4.9 2 4 2.9 4 4V20C4 21.1 4.9 22 6 22H18C19.1 22 20 21.1 20 20V8L14 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                    <polyline points="14,2 14,8 20,8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M14 2H6C4.9 2 4 2.9 4 4V20C4 21.1 4.9 22 6 22H18C19.1 22 20 21.1 20 20V8L14 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    <polyline points="14,2 14,8 20,8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                   <span>{r.documentType}</span>
                 </div>
@@ -1041,9 +1043,9 @@ export default function MessageBubble({ message, conversationId, onFollowUp }) {
           {r.suggestedQuestions && r.suggestedQuestions.length > 0 && onFollowUp && (
             <div className="suggested-chips-container fade-in-section" style={{ animationDelay: '1000ms' }}>
               {r.suggestedQuestions.map((q, i) => (
-                <button 
-                  key={i} 
-                  className="suggested-chip" 
+                <button
+                  key={i}
+                  className="suggested-chip"
                   onClick={() => onFollowUp(q)}
                 >
                   {q}

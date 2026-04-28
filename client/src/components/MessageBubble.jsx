@@ -335,20 +335,30 @@ function TrialCard({ trial, index, conversationId }) {
   const checkEligibility = async (additionalContext = '') => {
     setMatchState('loading');
     try {
+      const headers = { 'Content-Type': 'application/json' };
+      const token = localStorage.getItem('curalink-token');
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const res = await fetch(`${API_BASE}/chat/trial-match`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ criteria: trial.eligibility, conversationId, additionalContext })
       });
       const data = await res.json();
       if (res.ok) {
-        setMatchState(data);
-        setFollowUpAnswer('');
+        // Validate response has the expected shape
+        const safeData = {
+          isEligible: typeof data.isEligible === 'boolean' ? data.isEligible : false,
+          reasoning: data.reasoning || 'Unable to determine eligibility. Please review the criteria manually.',
+          missingQuestions: Array.isArray(data.missingQuestions) ? data.missingQuestions : []
+        };
+        setMatchState(safeData);
+        setFollowUpAnswer({});
       } else {
         setMatchState({ error: data.error || 'Failed to check match' });
       }
     } catch {
-      setMatchState({ error: 'Network error checking eligibility' });
+      setMatchState({ error: 'Network error checking eligibility. Please try again.' });
     }
   };
 

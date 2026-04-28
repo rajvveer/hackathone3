@@ -50,9 +50,47 @@ class LLMService {
     const params = { model, messages, temperature, max_tokens: maxTokens };
     if (jsonMode) params.response_format = { type: 'json_object' };
 
-    // Prevent Groq from hanging indefinitely on rate limits or API outages
-    const completion = await this.groq.chat.completions.create(params, { timeout: 10000 });
-    return completion.choices[0]?.message?.content || '';
+    try {
+      // Prevent Groq from hanging indefinitely on rate limits or API outages
+      const completion = await this.groq.chat.completions.create(params, { timeout: 10000 });
+      return completion.choices[0]?.message?.content || '';
+    } catch (error) {
+      // Some responses fail Groq's strict JSON validator even with json_object mode.
+      // Retry once without strict response_format and salvage JSON from the output.
+      if (jsonMode && this._isJsonValidationError(error)) {
+        const retryMessages = [];
+        if (systemPrompt) retryMessages.push({ role: 'system', content: systemPrompt });
+        retryMessages.push({
+          role: 'system',
+          content: 'Return ONLY one valid JSON object. No markdown, no prose, no code fences, no trailing text.'
+        });
+        retryMessages.push({ role: 'user', content: prompt });
+
+        const retryCompletion = await this.groq.chat.completions.create({
+          model,
+          messages: retryMessages,
+          temperature: 0,
+          max_tokens: maxTokens
+        }, { timeout: 10000 });
+
+        const retryContent = retryCompletion.choices[0]?.message?.content || '';
+        return this._extractJsonObject(retryContent);
+      }
+      throw error;
+    }
+  }
+
+  _isJsonValidationError(error) {
+    const msg = (error && (error.message || String(error))) || '';
+    return msg.includes('json_validate_failed') || msg.includes('Failed to validate JSON');
+  }
+
+  _extractJsonObject(text) {
+    if (!text || typeof text !== 'string') return '{}';
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start === -1 || end === -1 || end <= start) return '{}';
+    return text.slice(start, end + 1);
   }
 
   /**
@@ -478,16 +516,21 @@ Respond as Dr. Curalink in 80 words or less. Be brief, warm, and direct.`;
    * Returns structured analysis with key findings, abnormal values, etc.
    */
   async analyzeMedicalDocument(extractedText, userQuery = '') {
-    const systemPrompt = `You are Curalink, an advanced AI Medical Document Analyzer. A user has uploaded a medical document (lab report, prescription, discharge summary, radiology report, etc.) and you need to provide a thorough, structured analysis.
+    const systemPrompt = `You are Curalink, an advanced AI Medical Document Analyzer. A user has uploaded a medical document and you need to provide a thorough, structured analysis.
+
+The document could be ANY type: lab report, prescription, discharge summary, radiology report, research brief, clinical trial summary, pathology report, doctor's note, insurance document, etc.
 
 CRITICAL RULES:
-1. ONLY analyze what is actually present in the document text — never hallucinate values
-2. Identify the document type accurately
-3. Highlight ANY abnormal or critical values with clear explanations
-4. Use simple language that patients can understand
-5. Always include a disclaimer to consult healthcare providers
-6. If the document is unclear or partial, acknowledge limitations
-7. Respond in valid JSON format ONLY`;
+1. ONLY analyze what is actually present in the document text — never hallucinate values or facts
+2. Identify the document type accurately and adapt your analysis style accordingly
+3. For LAB REPORTS: extract actual numeric values, reference ranges, and flag abnormalities
+4. For RESEARCH/CLINICAL documents: extract key medical insights, conditions studied, treatment approaches, and notable statistical findings
+5. For PRESCRIPTIONS: list medications, dosages, frequencies, and any noted interactions
+6. For RADIOLOGY/IMAGING: summarize findings, measurements, and clinical impressions
+7. Use simple language that patients can understand
+8. Always include a disclaimer to consult healthcare providers
+9. If the document is unclear or partial, acknowledge limitations
+10. Respond in valid JSON format ONLY`;
 
     const prompt = `EXTRACTED DOCUMENT TEXT:
 ---
@@ -498,22 +541,29 @@ ${userQuery ? `USER'S SPECIFIC QUESTION: "${userQuery}"` : 'No specific question
 
 Analyze this medical document and respond ONLY in this exact JSON format:
 {
-  "documentType": "Type of document (e.g., Complete Blood Count Report, Prescription, Discharge Summary, MRI Report, etc.)",
-  "summary": "2-3 sentence plain-language summary of what this document shows",
+  "documentType": "Precise document type (e.g., Complete Blood Count Report, Research Dossier, Prescription, Discharge Summary, MRI Report, Clinical Trial Summary, etc.)",
+  "primaryCondition": "The PRIMARY medical condition, disease, or health topic this document is about (e.g., 'heart disease', 'type 2 diabetes', 'lung cancer', 'hypertension'). This MUST be a concise medical term, not a sentence. If multiple conditions, pick the most prominent one.",
+  "summary": "3-4 sentence plain-language summary covering: what this document is, the key takeaways, and what it means for the patient. Be specific — mention actual conditions, values, or findings from the document.",
   "keyFindings": [
     {
-      "parameter": "Test/Parameter name",
-      "value": "The value found",
-      "referenceRange": "Normal range if available",
-      "status": "normal | elevated | low | critical",
-      "explanation": "What this means in simple terms"
+      "parameter": "Test name, finding title, or key insight",
+      "value": "Actual value, result, or key detail from the document",
+      "referenceRange": "Normal range if available, or 'N/A'",
+      "status": "normal | elevated | low | critical | notable",
+      "explanation": "What this means in simple, actionable terms for the patient"
     }
   ],
-  "abnormalValues": ["List of any concerning or out-of-range findings with brief explanation"],
+  "abnormalValues": ["List of concerning or out-of-range findings, each with a brief explanation of clinical significance"],
   "medications": ["List of any medications mentioned with dosages if available"],
-  "recommendations": "Brief personalized recommendation based on the findings. End with a medical disclaimer.",
-  "suggestedResearchTopics": ["2-3 medical topics the user might want to research based on this document"]
-}`;
+  "recommendations": "Specific, actionable recommendations based on the document findings. Reference specific findings. End with a 1-sentence medical disclaimer.",
+  "suggestedResearchTopics": ["3 specific medical research topics the user might want to explore, based on the actual conditions/findings in this document. Be specific (e.g., 'latest treatments for atrial fibrillation' not 'heart disease research')"]
+}
+
+IMPORTANT:
+- For "keyFindings": adapt to the document type. Lab reports should have numeric values and ranges. Research documents should have key medical insights with specific data points. Prescriptions should list each medication as a finding.
+- The "primaryCondition" must be a short medical term (1-4 words max), not a description.
+- Make "summary" genuinely informative — avoid generic statements like "this document shows research". Instead say what specific conditions/findings it covers.
+- Make "recommendations" specific to the findings, not generic advice.`;
 
     try {
       const result = await this.generate(prompt, {
@@ -529,6 +579,7 @@ Analyze this medical document and respond ONLY in this exact JSON format:
       console.error('Medical document analysis failed:', e.message);
       return {
         documentType: 'Medical Document',
+        primaryCondition: '',
         summary: `Analysis of uploaded document (${extractedText.length} characters extracted). The AI was unable to produce a structured analysis. Please review the extracted text below.`,
         keyFindings: [],
         abnormalValues: [],
@@ -615,63 +666,207 @@ Respond ONLY in strictly valid JSON format matching this exact schema:
 
   geoCoordsCache = new Map();
 
+  // Hardcoded fallback coordinates for common cities — ensures the map ALWAYS renders
+  static CITY_COORDS = {
+    'new york': { lat: 40.71, lng: -74.01 }, 'los angeles': { lat: 34.05, lng: -118.24 },
+    'chicago': { lat: 41.88, lng: -87.63 }, 'houston': { lat: 29.76, lng: -95.37 },
+    'boston': { lat: 42.36, lng: -71.06 }, 'seattle': { lat: 47.61, lng: -122.33 },
+    'san francisco': { lat: 37.77, lng: -122.42 }, 'philadelphia': { lat: 39.95, lng: -75.17 },
+    'baltimore': { lat: 39.29, lng: -76.61 }, 'rochester': { lat: 44.02, lng: -92.47 },
+    'cleveland': { lat: 41.50, lng: -81.69 }, 'pittsburgh': { lat: 40.44, lng: -79.99 },
+    'atlanta': { lat: 33.75, lng: -84.39 }, 'miami': { lat: 25.76, lng: -80.19 },
+    'dallas': { lat: 32.78, lng: -96.80 }, 'phoenix': { lat: 33.45, lng: -112.07 },
+    'denver': { lat: 39.74, lng: -104.99 }, 'detroit': { lat: 42.33, lng: -83.05 },
+    'minneapolis': { lat: 44.98, lng: -93.27 }, 'nashville': { lat: 36.16, lng: -86.78 },
+    'portland': { lat: 45.52, lng: -122.68 }, 'san diego': { lat: 32.72, lng: -117.16 },
+    'tampa': { lat: 27.95, lng: -82.46 }, 'st. louis': { lat: 38.63, lng: -90.20 },
+    'salt lake city': { lat: 40.76, lng: -111.89 }, 'indianapolis': { lat: 39.77, lng: -86.16 },
+    'milwaukee': { lat: 43.04, lng: -87.91 }, 'jacksonville': { lat: 30.33, lng: -81.66 },
+    'columbus': { lat: 39.96, lng: -82.99 }, 'charlotte': { lat: 35.23, lng: -80.84 },
+    'raleigh': { lat: 35.78, lng: -78.64 }, 'durham': { lat: 35.99, lng: -78.90 },
+    'new haven': { lat: 41.31, lng: -72.92 }, 'ann arbor': { lat: 42.28, lng: -83.74 },
+    'chapel hill': { lat: 35.91, lng: -79.05 }, 'gainesville': { lat: 29.65, lng: -82.32 },
+    'birmingham': { lat: 33.52, lng: -86.80 }, 'memphis': { lat: 35.15, lng: -90.05 },
+    'richmond': { lat: 37.54, lng: -77.44 }, 'omaha': { lat: 41.26, lng: -95.94 },
+    'daphne': { lat: 30.60, lng: -87.90 }, 'fairhope': { lat: 30.52, lng: -87.90 },
+    'mobile': { lat: 30.70, lng: -88.04 }, 'malbis': { lat: 30.62, lng: -87.83 },
+    'london': { lat: 51.51, lng: -0.13 }, 'paris': { lat: 48.86, lng: 2.35 },
+    'berlin': { lat: 52.52, lng: 13.41 }, 'munich': { lat: 48.14, lng: 11.58 },
+    'amsterdam': { lat: 52.37, lng: 4.90 }, 'rome': { lat: 41.90, lng: 12.50 },
+    'milan': { lat: 45.46, lng: 9.19 }, 'madrid': { lat: 40.42, lng: -3.70 },
+    'barcelona': { lat: 41.39, lng: 2.17 }, 'vienna': { lat: 48.21, lng: 16.37 },
+    'zurich': { lat: 47.38, lng: 8.54 }, 'brussels': { lat: 50.85, lng: 4.35 },
+    'copenhagen': { lat: 55.68, lng: 12.57 }, 'stockholm': { lat: 59.33, lng: 18.07 },
+    'oslo': { lat: 59.91, lng: 10.75 }, 'helsinki': { lat: 60.17, lng: 24.94 },
+    'toronto': { lat: 43.65, lng: -79.38 }, 'montreal': { lat: 45.50, lng: -73.57 },
+    'vancouver': { lat: 49.28, lng: -123.12 }, 'ottawa': { lat: 45.42, lng: -75.70 },
+    'beijing': { lat: 39.90, lng: 116.40 }, 'shanghai': { lat: 31.23, lng: 121.47 },
+    'guangzhou': { lat: 23.13, lng: 113.26 }, 'shenzhen': { lat: 22.54, lng: 114.06 },
+    'chengdu': { lat: 30.57, lng: 104.07 }, 'wuhan': { lat: 30.59, lng: 114.31 },
+    'hangzhou': { lat: 30.27, lng: 120.15 }, 'nanjing': { lat: 32.06, lng: 118.80 },
+    'changsha': { lat: 28.23, lng: 112.94 }, 'fuzhou': { lat: 26.07, lng: 119.30 },
+    'foshan': { lat: 23.02, lng: 113.12 }, 'tokyo': { lat: 35.68, lng: 139.69 },
+    'osaka': { lat: 34.69, lng: 135.50 }, 'seoul': { lat: 37.57, lng: 126.98 },
+    'sydney': { lat: -33.87, lng: 151.21 }, 'melbourne': { lat: -37.81, lng: 144.96 },
+    'mumbai': { lat: 19.08, lng: 72.88 }, 'delhi': { lat: 28.61, lng: 77.21 },
+    'new delhi': { lat: 28.61, lng: 77.21 }, 'bangalore': { lat: 12.97, lng: 77.59 },
+    'chennai': { lat: 13.08, lng: 80.27 }, 'hyderabad': { lat: 17.39, lng: 78.49 },
+    'sao paulo': { lat: -23.55, lng: -46.63 }, 'rio de janeiro': { lat: -22.91, lng: -43.17 },
+    'mexico city': { lat: 19.43, lng: -99.13 }, 'buenos aires': { lat: -34.60, lng: -58.38 },
+    'cairo': { lat: 30.04, lng: 31.24 }, 'cape town': { lat: -33.92, lng: 18.42 },
+    'tel aviv': { lat: 32.09, lng: 34.78 }, 'jerusalem': { lat: 31.77, lng: 35.23 },
+    'singapore': { lat: 1.35, lng: 103.82 }, 'bangkok': { lat: 13.76, lng: 100.50 },
+    'taipei': { lat: 25.03, lng: 121.57 }, 'hong kong': { lat: 22.32, lng: 114.17 },
+    'united states': { lat: 39.83, lng: -98.58 }, 'china': { lat: 35.86, lng: 104.20 },
+    'canada': { lat: 56.13, lng: -106.35 }, 'italy': { lat: 41.87, lng: 12.57 },
+    'germany': { lat: 51.17, lng: 10.45 }, 'france': { lat: 46.23, lng: 2.21 },
+    'spain': { lat: 40.46, lng: -3.75 }, 'japan': { lat: 36.20, lng: 138.25 },
+    'south korea': { lat: 35.91, lng: 127.77 }, 'australia': { lat: -25.27, lng: 133.78 },
+    'india': { lat: 20.59, lng: 78.96 }, 'brazil': { lat: -14.24, lng: -51.93 },
+    'uk': { lat: 55.38, lng: -3.44 }, 'united kingdom': { lat: 55.38, lng: -3.44 },
+  };
+
   /**
-   * Extract approximate coordinates for an array of location strings
+   * Extract approximate coordinates for an array of location strings.
+   * 
+   * Strategy:
+   *  1. Split compound pipe-delimited location strings into individual city/country fragments
+   *  2. Check hardcoded fallback dictionary first (instant, no API call)
+   *  3. Only call Groq LLM for genuinely unknown locations
+   *  4. Map resolved coordinates back to the ORIGINAL compound location strings
    */
   async extractCoordinatesBatch(locationsList) {
-    if (!this.groq || !locationsList || locationsList.length === 0) return [];
+    if (!locationsList || locationsList.length === 0) return [];
 
     const results = [];
-    const uncached = [];
 
-    for (const loc of locationsList) {
-      if (this.geoCoordsCache.has(loc)) {
-        const cached = this.geoCoordsCache.get(loc);
-        if (cached) results.push({ location: loc, lat: cached.lat, lng: cached.lng });
-      } else {
-        uncached.push(loc);
+    // For each compound location string, try to resolve coordinates
+    for (const fullLoc of locationsList) {
+      // Check full-string cache first
+      if (this.geoCoordsCache.has(fullLoc)) {
+        const cached = this.geoCoordsCache.get(fullLoc);
+        if (cached) results.push({ location: fullLoc, lat: cached.lat, lng: cached.lng });
+        continue;
+      }
+
+      // Split compound location strings (pipe-delimited) into fragments
+      // e.g. "Mayo Clinic, Rochester, Minnesota, US | Hospital B, London, UK" → ["Rochester", "Minnesota", "London"]
+      const fragments = fullLoc.split('|').flatMap(part => 
+        part.split(',').map(s => s.trim().toLowerCase()).filter(s => s.length > 2)
+      );
+
+      // Try hardcoded fallback first (most reliable, instant)
+      let resolved = false;
+      for (const frag of fragments) {
+        if (LLMService.CITY_COORDS[frag]) {
+          const coords = LLMService.CITY_COORDS[frag];
+          this.geoCoordsCache.set(fullLoc, coords);
+          results.push({ location: fullLoc, lat: coords.lat, lng: coords.lng });
+          resolved = true;
+          break;
+        }
+      }
+      if (resolved) continue;
+
+      // Try partial matches (e.g. "rochester, minnesota" contains "rochester")
+      for (const [city, coords] of Object.entries(LLMService.CITY_COORDS)) {
+        if (fragments.some(frag => frag.includes(city) || city.includes(frag))) {
+          this.geoCoordsCache.set(fullLoc, coords);
+          results.push({ location: fullLoc, lat: coords.lat, lng: coords.lng });
+          resolved = true;
+          break;
+        }
+      }
+      if (resolved) continue;
+
+      // Queue for LLM geocoding — extract just the first meaningful city/country fragment
+      const simplifiedLoc = this._extractSimpleLocation(fullLoc);
+      if (simplifiedLoc) {
+        // Check if simplified version is in cache
+        if (this.geoCoordsCache.has(simplifiedLoc)) {
+          const cached = this.geoCoordsCache.get(simplifiedLoc);
+          if (cached) {
+            this.geoCoordsCache.set(fullLoc, cached); // also cache under full string
+            results.push({ location: fullLoc, lat: cached.lat, lng: cached.lng });
+          }
+        } else {
+          // Will be resolved by LLM batch below
+        }
       }
     }
 
-    // Limit to top 15 locations to avoid huge token prompts
-    const batch = uncached.slice(0, 15);
+    // Collect unresolved locations for LLM batch geocoding
+    const unresolved = locationsList.filter(loc => !this.geoCoordsCache.has(loc));
+    if (unresolved.length > 0 && this.groq) {
+      const simplifiedBatch = unresolved
+        .map(loc => ({ original: loc, simple: this._extractSimpleLocation(loc) }))
+        .filter(item => item.simple)
+        .slice(0, 12);
 
-    // Add max_tokens to prevent Groq from reserving thousands of TPM for the response output buffer
-    const prompt = `You are a geographical coordinate extractor. Given a list of location strings (e.g. cities, hospitals), return approximate latitude and longitude coordinates for each. Keep original strings matching perfectly.
+      if (simplifiedBatch.length > 0) {
+        const simpleNames = simplifiedBatch.map(item => item.simple);
+        
+        try {
+          const prompt = `Return approximate latitude/longitude coordinates for these locations. Respond ONLY in valid JSON.
 
-Locations: ${JSON.stringify(batch)}
+Locations: ${JSON.stringify(simpleNames)}
 
-Return ONLY valid JSON matching this schema:
-{
-  "coordinates": [
-    { "location": "string", "lat": number, "lng": number }
-  ]
-}`; // keep prompt formatting
+{"coordinates": [{"location": "string", "lat": number, "lng": number}]}`;
 
-    try {
-      const response = await this.groq.chat.completions.create({
-        messages: [{ role: 'user', content: prompt }],
-        model: MODELS.QUERY_EXPANSION,
-        temperature: 0,
-        max_tokens: 500,
-        response_format: { type: "json_object" }
-      });
-      
-      const rawContent = response.choices[0]?.message?.content || '{"coordinates":[]}';
-      const parsed = JSON.parse(rawContent);
-      const newCoords = parsed.coordinates || [];
+          const response = await this.groq.chat.completions.create({
+            messages: [{ role: 'user', content: prompt }],
+            model: MODELS.QUERY_EXPANSION,
+            temperature: 0,
+            max_tokens: 1200,
+            response_format: { type: "json_object" }
+          }, { timeout: 8000 });
 
-      newCoords.forEach(c => {
-        if (c && c.location) {
-          this.geoCoordsCache.set(c.location, { lat: c.lat, lng: c.lng });
-          results.push(c);
+          const rawContent = response.choices[0]?.message?.content || '{"coordinates":[]}';
+          const parsed = JSON.parse(rawContent);
+          const newCoords = parsed.coordinates || [];
+
+          // Map LLM results back to original compound strings
+          for (const coord of newCoords) {
+            if (!coord || !coord.location || coord.lat == null || coord.lng == null) continue;
+
+            const matchingItem = simplifiedBatch.find(
+              item => item.simple.toLowerCase() === coord.location.toLowerCase()
+            );
+            if (matchingItem) {
+              const coordObj = { lat: coord.lat, lng: coord.lng };
+              this.geoCoordsCache.set(coord.location, coordObj);
+              this.geoCoordsCache.set(matchingItem.original, coordObj);
+              results.push({ location: matchingItem.original, lat: coord.lat, lng: coord.lng });
+            }
+          }
+        } catch (err) {
+          console.error('LLM Coordinate Extractor Error:', err.message);
+          // Fallback already handled above — we just won't have coords for these
         }
-      });
-      return results;
-    } catch (err) {
-      console.error('LLM Coordinate Extractor Error:', err.message);
-      return results; // Return whatever we found in cache
+      }
     }
+
+    console.log(`🗺️ Geocoded ${results.length}/${locationsList.length} locations (${locationsList.length - unresolved.length} from cache/fallback)`);
+    return results;
+  }
+
+  /**
+   * Extract a simple "City, Country" from a compound location string.
+   * e.g. "Mayo Clinic in Rochester, Rochester, Minnesota, United States" → "Rochester, United States"
+   */
+  _extractSimpleLocation(fullLoc) {
+    if (!fullLoc) return null;
+    // Take the first pipe-delimited entry
+    const firstEntry = fullLoc.split('|')[0].trim();
+    // Split by comma and extract city + country (typically last two meaningful parts)
+    const parts = firstEntry.split(',').map(s => s.trim()).filter(s => s.length > 1);
+    if (parts.length >= 2) {
+      // Return "City, Country" — usually the 2nd and last parts
+      const city = parts.length >= 3 ? parts[parts.length - 3] : parts[0];
+      const country = parts[parts.length - 1];
+      return `${city}, ${country}`;
+    }
+    return parts[0] || null;
   }
 }
 module.exports = new LLMService();

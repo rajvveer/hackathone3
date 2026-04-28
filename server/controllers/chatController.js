@@ -79,14 +79,18 @@ async function loadOrCreateConversation(conversationId, userInput, user) {
         location: defaultProfile.location
       }
     });
-  } else if (typeof userInput === 'object' && userInput.disease) {
+  } else {
     // Update userProfile on pre-created conversations (from /conversations/new)
     const defaultProfile = dbUser?.medicalProfile || {};
-    conversation.userProfile = {
-      patientName: userInput.patientName || conversation.userProfile?.patientName || defaultProfile.patientName || '',
-      diseaseOfInterest: userInput.disease || conversation.userProfile?.diseaseOfInterest || defaultProfile.diseaseOfInterest || '',
-      location: userInput.location || conversation.userProfile?.location || defaultProfile.location || ''
-    };
+    const hasExistingProfile = conversation.userProfile && conversation.userProfile.diseaseOfInterest;
+    
+    if (!hasExistingProfile || typeof userInput === 'object') {
+      conversation.userProfile = {
+        patientName: (typeof userInput === 'object' ? userInput.patientName : '') || conversation.userProfile?.patientName || defaultProfile.patientName || '',
+        diseaseOfInterest: (typeof userInput === 'object' ? userInput.disease : '') || conversation.userProfile?.diseaseOfInterest || defaultProfile.diseaseOfInterest || '',
+        location: (typeof userInput === 'object' ? userInput.location : '') || conversation.userProfile?.location || defaultProfile.location || ''
+      };
+    }
   }
 
   // Backwards compat: if user logs in on an anonymous session, claim it
@@ -101,7 +105,10 @@ function getContext(conversation) {
   return {
     lastDisease: conversation.metadata?.lastDisease || '',
     lastIntent: conversation.metadata?.lastIntent || '',
-    lastLocation: conversation.metadata?.lastLocation || ''
+    lastLocation: conversation.metadata?.lastLocation || '',
+    diseaseOfInterest: conversation.userProfile?.diseaseOfInterest || '',
+    location: conversation.userProfile?.location || '',
+    patientName: conversation.userProfile?.patientName || ''
   };
 }
 
@@ -477,10 +484,24 @@ exports.getConversations = async (req, res) => {
 
 exports.createConversation = async (req, res) => {
   try {
+    let userProfile = {};
+    if (req.user) {
+      const User = require('../models/User');
+      const dbUser = await User.findById(req.user._id);
+      if (dbUser && dbUser.medicalProfile) {
+        userProfile = {
+          patientName: dbUser.medicalProfile.patientName || '',
+          diseaseOfInterest: dbUser.medicalProfile.diseaseOfInterest || '',
+          location: dbUser.medicalProfile.location || ''
+        };
+      }
+    }
+
     const conversation = new Conversation({
       conversationId: uuidv4(),
       title: 'New Conversation',
-      userId: req.user ? req.user._id : undefined
+      userId: req.user ? req.user._id : undefined,
+      userProfile
     });
     await conversation.save();
     res.json({ conversationId: conversation.conversationId });
@@ -602,6 +623,32 @@ exports.handleFileUpload = async (req, res) => {
       processed.extractedText,
       userQuery || ''
     );
+
+    // Step 3: RAG Integration
+    if (analysis.primaryCondition) {
+      console.log(`\n🧠 Step 3: Triggering RAG for extracted condition: ${analysis.primaryCondition}...`);
+      const context = getContext(conversation);
+      const ragQuery = userQuery || `Latest treatments and research for ${analysis.primaryCondition}`;
+      
+      const expansion = await queryExpander.expand(ragQuery, {
+        ...context,
+        disease: analysis.primaryCondition,
+        lastDisease: analysis.primaryCondition
+      });
+
+      const retrieval = await retrievalManager.retrieve(expansion);
+      let ranked = rankingPipeline.rank(retrieval.publications, retrieval.clinicalTrials, expansion);
+
+      if (ranked.clinicalTrials.length === 0 && expansion.disease) {
+        const fallbackTrials = await clinicalTrialsService.fetchTrials(expansion.disease, '', expansion.location);
+        const fallbackRanked = rankingPipeline.rank([], fallbackTrials, { ...expansion, intent: '' });
+        ranked.clinicalTrials = fallbackRanked.clinicalTrials;
+      }
+
+      analysis.publications = ranked.publications.map(buildPublicationResponse);
+      analysis.clinicalTrials = ranked.clinicalTrials.map(buildTrialResponse);
+      analysis.researchers = retrieval.researchers || [];
+    }
 
     const totalTimeMs = Date.now() - totalStart;
     console.log(`✅ File analysis complete in ${totalTimeMs}ms`);

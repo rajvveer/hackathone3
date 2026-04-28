@@ -68,17 +68,25 @@ export function useChat() {
       setCurrentConversationId(id);
 
       // Map DB message format to UI message format
-      const uiMessages = (data.messages || []).map(msg => ({
-        role: msg.role,
-        content: msg.content,
-        structuredInput: msg.structuredInput || null,
-        // DB response structure matches what MessageBubble expects
-        response: msg.response || null,
-        pipelineMetrics: msg.pipelineMetrics || null,
-        isError: false,
-        isNew: false,
-        timestamp: msg.timestamp
-      }));
+      const uiMessages = (data.messages || []).map(msg => {
+        // Reconstruct response with isFileAnalysis if it was stored at message level (legacy)
+        let response = msg.response || null;
+        if (response && !response.isFileAnalysis && msg.isFileAnalysis) {
+          response = { ...response, isFileAnalysis: true };
+        }
+
+        return {
+          role: msg.role,
+          content: msg.content,
+          structuredInput: msg.structuredInput || null,
+          fileAttachment: msg.fileAttachment || null,
+          response,
+          pipelineMetrics: msg.pipelineMetrics || null,
+          isError: false,
+          isNew: false,
+          timestamp: msg.timestamp
+        };
+      });
 
       setMessages(uiMessages);
       setExpandedQueries([]);
@@ -284,37 +292,41 @@ export function useChat() {
     setMessages(prev => [...prev, userMsg]);
     setLoading(true);
 
+    const isFirstQuery = messages.length === 0;
+
     try {
-      // Request clarification questions from backend
-      const clarifyResult = await requestClarification(input);
+      if (isFirstQuery) {
+        // Request clarification questions from backend
+        const clarifyResult = await requestClarification(input);
 
-      if (clarifyResult.type === 'conversational') {
-        // Conversational (greeting) — show reply directly
-        setMessages(prev => [...prev, {
-          role: 'assistant',
-          content: clarifyResult.content,
-          response: null,
-          pipelineMetrics: null,
-          isNew: true,
-          timestamp: new Date()
-        }]);
-        setLoading(false);
-        return;
+        if (clarifyResult.type === 'conversational') {
+          // Conversational (greeting) — show reply directly
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: clarifyResult.content,
+            response: null,
+            pipelineMetrics: null,
+            isNew: true,
+            timestamp: new Date()
+          }]);
+          setLoading(false);
+          return;
+        }
+
+        if (clarifyResult.type === 'clarification' && clarifyResult.questions?.length > 0) {
+          // Show follow-up questions
+          setFollowUp({
+            originalQuery: input,
+            questions: clarifyResult.questions,
+            currentIndex: 0,
+            answers: []
+          });
+          setLoading(false);
+          return;
+        }
       }
 
-      if (clarifyResult.type === 'clarification' && clarifyResult.questions?.length > 0) {
-        // Show follow-up questions
-        setFollowUp({
-          originalQuery: input,
-          questions: clarifyResult.questions,
-          currentIndex: 0,
-          answers: []
-        });
-        setLoading(false);
-        return;
-      }
-
-      // Fallback: no questions generated, go straight to pipeline
+      // Fallback or subsequent query: no questions generated, go straight to pipeline
       setLoading(false);
       return sendToResearchPipeline(input, false);
     } catch (e) {
@@ -323,7 +335,7 @@ export function useChat() {
       setLoading(false);
       return sendToResearchPipeline(input, false);
     }
-  }, [loading, sendToResearchPipeline]);
+  }, [loading, messages.length, sendToResearchPipeline]);
 
   /**
    * Submit follow-up answer and advance to next question or trigger research.
@@ -423,6 +435,10 @@ export function useChat() {
           ...analysis,
           fileInfo: result.fileInfo,
           isFileAnalysis: true,
+          // RAG pipeline results (publications, trials, researchers)
+          publications: analysis.publications || [],
+          clinicalTrials: analysis.clinicalTrials || [],
+          researchers: analysis.researchers || [],
         },
         pipelineMetrics: result.pipelineMetrics,
         isNew: true,

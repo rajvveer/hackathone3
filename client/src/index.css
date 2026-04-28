@@ -397,6 +397,32 @@ body {
   border-top: 1px solid var(--border-subtle);
 }
 
+.auth-section {
+  width: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Force the Google Sign-In iframe/button to fit inside the sidebar */
+.auth-section > div,
+.auth-section iframe {
+  max-width: 100% !important;
+  width: 100% !important;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+.auth-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.4;
+  margin: 0;
+}
+
 .sidebar-footer-badge {
   display: flex;
   align-items: center;

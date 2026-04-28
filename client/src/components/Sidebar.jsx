@@ -214,6 +214,7 @@ export default function Sidebar({ conversations, currentConversationId, onSelect
                 shape="rectangular"
                 text="signin_with"
                 size="large"
+                width="188"
               />
               <p className="auth-hint">Login to save your conversations permanently.</p>
             </div>

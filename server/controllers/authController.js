@@ -17,7 +17,7 @@ exports.googleLogin = async (req, res) => {
       audience: process.env.GOOGLE_CLIENT_ID,
     });
     const payload = ticket.getPayload();
-    
+
     // Find or create user
     let user = await User.findOne({ googleId: payload.sub });
     if (!user) {
@@ -71,7 +71,7 @@ exports.updateProfile = async (req, res) => {
         ...medicalProfile
       };
     }
-    
+
     await user.save();
     res.json(user);
   } catch (error) {

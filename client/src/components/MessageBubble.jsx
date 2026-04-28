@@ -122,9 +122,12 @@ function CopyButton({ text }) {
 function ClinicalTrialsHeatmap({ trials }) {
   const [markers, setMarkers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     let mounted = true;
+    let retryCount = 0;
+
     const fetchCoords = async () => {
       const locations = trials
         .map(t => t.location)
@@ -138,14 +141,20 @@ function ClinicalTrialsHeatmap({ trials }) {
       }
 
       try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 12000); // 12s timeout
+
         const res = await fetch(`${API_BASE}/chat/heatmap-coords`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ locations: uniqueLocs })
+          body: JSON.stringify({ locations: uniqueLocs }),
+          signal: controller.signal
         });
+        clearTimeout(timeout);
+
         if (res.ok) {
           const data = await res.json();
-          if (mounted) {
+          if (mounted && Array.isArray(data) && data.length > 0) {
             const enrichedMarkers = [];
             trials.forEach(trial => {
               const match = data.find(d => d.location === trial.location);
@@ -166,10 +175,28 @@ function ClinicalTrialsHeatmap({ trials }) {
               }
             });
             setMarkers(finalMarkers);
+          } else if (mounted && retryCount < 1) {
+            // Retry once if we got an empty response
+            retryCount++;
+            console.log('🗺️ Heatmap: empty response, retrying...');
+            setTimeout(fetchCoords, 1500);
+            return;
           }
+        } else if (mounted && retryCount < 1) {
+          retryCount++;
+          console.log('🗺️ Heatmap: non-OK response, retrying...');
+          setTimeout(fetchCoords, 2000);
+          return;
         }
       } catch (err) {
         console.error('Heatmap load error', err);
+        if (mounted && retryCount < 1 && err.name !== 'AbortError') {
+          retryCount++;
+          console.log('🗺️ Heatmap: error, retrying...');
+          setTimeout(fetchCoords, 2000);
+          return;
+        }
+        if (mounted) setError(true);
       } finally {
         if (mounted) setLoading(false);
       }
@@ -649,6 +676,7 @@ export default function MessageBubble({ message, conversationId, onFollowUp }) {
       elevated: '#fbbf24',
       low: '#60a5fa',
       critical: '#ef4444',
+      notable: '#a78bfa',
     };
 
     return (
@@ -791,7 +819,7 @@ export default function MessageBubble({ message, conversationId, onFollowUp }) {
                 </div>
                 <div className="suggested-topics">
                   {r.suggestedResearchTopics.map((topic, i) => (
-                    <span key={i} className="suggested-topic-chip">{topic}</span>
+                    <span key={i} className="suggested-topic-chip" style={{ cursor: 'pointer' }} onClick={() => onFollowUp && onFollowUp(topic)} title="Research this topic">{topic}</span>
                   ))}
                 </div>
               </div>

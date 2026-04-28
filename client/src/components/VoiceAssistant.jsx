@@ -49,14 +49,14 @@ export default function VoiceAssistant({ onClose, onResearchData }) {
     closedRef.current = true;
     audioQueueRef.current = [];
     isPlayingRef.current = false;
-    if (currentSourceRef.current) { 
-      try { currentSourceRef.current.stop(); } catch (_) {} 
-      try { currentSourceRef.current.pause(); } catch (_) {} 
+    if (currentSourceRef.current) {
+      try { currentSourceRef.current.stop(); } catch (_) { }
+      try { currentSourceRef.current.pause(); } catch (_) { }
     }
-    if (playbackCtxRef.current) { try { playbackCtxRef.current.close(); } catch (_) {} playbackCtxRef.current = null; }
-    if (mediaRecorderRef.current?.state !== 'inactive') { try { mediaRecorderRef.current?.stop(); } catch (_) {} }
+    if (playbackCtxRef.current) { try { playbackCtxRef.current.close(); } catch (_) { } playbackCtxRef.current = null; }
+    if (mediaRecorderRef.current?.state !== 'inactive') { try { mediaRecorderRef.current?.stop(); } catch (_) { } }
     if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
-    if (micCtxRef.current) { try { micCtxRef.current.close(); } catch (_) {} }
+    if (micCtxRef.current) { try { micCtxRef.current.close(); } catch (_) { } }
     if (socketRef.current) socketRef.current.disconnect();
     if (animRef.current) cancelAnimationFrame(animRef.current);
   }, []);
@@ -69,7 +69,7 @@ export default function VoiceAssistant({ onClose, onResearchData }) {
       setLogs([]);
       return;
     }
-    
+
     const possibleLogs = [
       "Accessing ClinicalTrials.gov registry...",
       "Querying PubMed vector database...",
@@ -82,9 +82,9 @@ export default function VoiceAssistant({ onClose, onResearchData }) {
       "Scanning evidence protocols...",
       "Formulating medical summary..."
     ];
-    
+
     setLogs(["Initializing RAG pipeline..."]);
-    
+
     const interval = setInterval(() => {
       setLogs(prev => {
         const nextLog = possibleLogs[Math.floor(Math.random() * possibleLogs.length)];
@@ -92,7 +92,7 @@ export default function VoiceAssistant({ onClose, onResearchData }) {
         return newLogs.slice(-3); // keep last 3 lines
       });
     }, 800);
-    
+
     return () => clearInterval(interval);
   }, [status]);
 
@@ -127,7 +127,7 @@ export default function VoiceAssistant({ onClose, onResearchData }) {
     while (audioQueueRef.current.length > 0) {
       if (closedRef.current) break;
       updateStatusRef.current('speaking'); // ensure ui stays green while processing
-      
+
       const chunk = audioQueueRef.current.shift();
       try {
         let ab;
@@ -149,7 +149,7 @@ export default function VoiceAssistant({ onClose, onResearchData }) {
         const blob = new Blob([ab], { type: 'audio/wav' });
         const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
-        
+
         currentSourceRef.current = audio;
 
         await new Promise(resolve => {
@@ -211,7 +211,7 @@ export default function VoiceAssistant({ onClose, onResearchData }) {
       noiseSamplesRef.current = [];
       calibratedRef.current = false;
 
-      if (micCtxRef.current) { try { micCtxRef.current.close(); } catch (_) {} micCtxRef.current = null; }
+      if (micCtxRef.current) { try { micCtxRef.current.close(); } catch (_) { } micCtxRef.current = null; }
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true }
@@ -330,7 +330,7 @@ export default function VoiceAssistant({ onClose, onResearchData }) {
     });
 
     return () => { hardStop(); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Animation + VAD ──────────────────────────────────────
@@ -485,7 +485,7 @@ export default function VoiceAssistant({ onClose, onResearchData }) {
     <div className="va-overlay" onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}>
       <button className="va-close" onClick={handleClose} aria-label="Close voice mode">
         <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-          <path d="M6 6L16 16M16 6L6 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+          <path d="M6 6L16 16M16 6L6 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
         </svg>
       </button>
 
@@ -497,8 +497,8 @@ export default function VoiceAssistant({ onClose, onResearchData }) {
           <span>
             {status === 'listening' ? 'Listening'
               : status === 'thinking' ? 'Thinking'
-              : status === 'speaking' ? 'Speaking'
-              : 'Ready'}
+                : status === 'speaking' ? 'Speaking'
+                  : 'Ready'}
           </span>
         </div>
         {status === 'idle' && (

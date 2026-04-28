@@ -10,7 +10,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",
-    "vite": "^8.0.4"
+    "vite": "^7.3.2"
   },
   "dependencies": {
     "@react-oauth/google": "^0.13.5",

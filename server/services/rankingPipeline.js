@@ -31,8 +31,8 @@ class RankingPipeline {
     const diseaseLower = (expansion.disease || '').toLowerCase().trim();
     const intentLower = (expansion.intent || '').toLowerCase().trim();
 
-    const hasSemanticOverlap = (pub) => {
-      const text = `${pub.title} ${pub.abstract}`.toLowerCase();
+    const hasSemanticOverlap = (item) => {
+      const text = `${item.title} ${item.abstract || item.summary || ''}`.toLowerCase();
       // Strict check: explicitly mentions both the disease and the user intent as exact phrases
       const hasDisease = !diseaseLower || text.includes(diseaseLower);
       const hasIntent = !intentLower || text.includes(intentLower);
